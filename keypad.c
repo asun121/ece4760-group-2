@@ -88,7 +88,12 @@ typedef signed int fix15 ;
 // the DDS units - core 0
 // Phase accumulator and phase increment. Increment sets output frequency.
 volatile unsigned int phase_accum_main_0;
-volatile unsigned int phase_incr_main_0 = (400.0*two32)/Fs ;
+// volatile unsigned int phase_incr_main_0 = (400.0*two32)/Fs ;
+
+// ADDITIONAL CODE 
+volatile unsigned int phase_incr_main_0;
+volatile unsigned int current_frequency;
+volatile unsigned int two32_fs = two32 / Fs; 
 
 // DDS sine table (populated in main())
 #define sine_table_size 256
@@ -153,11 +158,15 @@ static void alarm_irq(void) {
 
         if (STATE_0 == 0 && pressed) {
             //printf("%d/%d\n",count_0,BEEP_DURATION);
+            // ADDITIONAL CODE 
+            current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+            // current_frequency = -260 * count_0 / 6500.0 + 1740; 
+            phase_incr_main_0 = current_frequency * two32_fs;
             // DDS phase and sine table lookup
             phase_accum_main_0 += phase_incr_main_0  ;
             DAC_output_0 = fix2int15(multfix15(current_amplitude_0,
                 sin_table[phase_accum_main_0>>24])) + 2048 ;
-
+            
         
             // Ramp up amplitude
             if (count_0 < ATTACK_TIME) {
