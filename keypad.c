@@ -114,7 +114,7 @@ fix15 current_amplitude_1 = 0;      // current amplitude (modified in ISR)
 #define ATTACK_TIME 250
 #define DECAY_TIME 250
 #define SUSTAIN_TIME 10000
-#define BEEP_DURATION 10500
+#define BEEP_DURATION 6500
 #define BEEP_REPEAT_INTERVAL 50000
 
 // State machine variables
@@ -123,6 +123,7 @@ volatile unsigned int count_0 = 0;
 
 // button state: 0 = not pressed, 1 = maybe pressed, 2 = pressed, 3 = maybe not pressed
 volatile unsigned int BUTTON_STATE = 0;
+volatile unsigned int MODE = 0;
 
 // Track the pressed button
 volatile unsigned int TRACKED_BUTTON = 0;
@@ -151,7 +152,7 @@ uint16_t DAC_data_0; // output value
 
 bool pressed = false;
 bool action = false;
-
+static void play_sound(int sound);
 // This timer ISR is called on core 0
 static void alarm_irq(void)
 {
@@ -171,57 +172,76 @@ static void alarm_irq(void)
 
             if (TRACKED_BUTTON == 1)
             {
-                current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+                play_sound(1);
             }
             else if (TRACKED_BUTTON == 2)
             {
-                current_frequency = (0.0001183 * count_0 * count_0) + 2000;
-            }
-            // current_frequency = swoop_frequency_table[count_0];
-            phase_incr_main_0 = current_frequency * two32_fs;
-            // DDS phase and sine table lookup
-            phase_accum_main_0 += phase_incr_main_0;
-            if (current_amplitude_0 > int2fix15(1))
-            {
-                current_amplitude_0 = int2fix15(1);
-            }
-            DAC_output_0 = fix2int15(multfix15(current_amplitude_0,
-                                               sin_table[phase_accum_main_0 >> 24])) +
-                           2048;
-
-            // Ramp up amplitude
-            if (count_0 < ATTACK_TIME)
-            {
-                current_amplitude_0 = (current_amplitude_0 + attack_inc);
-            }
-            // Ramp down amplitude
-            else if (count_0 > BEEP_DURATION - DECAY_TIME)
-            {
-                current_amplitude_0 = (current_amplitude_0 - decay_inc);
+                play_sound(2);
             }
 
-            // Mask with DAC control bits
-            DAC_data_0 = (DAC_config_chan_B | (DAC_output_0 & 0xffff));
+        }
 
-            // SPI write (no spinlock b/c of SPI buffer)
-            spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
-
-            // Increment the counter
-            count_0 += 1;
-
-            // State transition?
-            if (count_0 >= BEEP_DURATION)
-            {
-                STATE_0 = 1;
-                count_0 = 0;
-                action = false;
-                // printf("in beep: %d\n",pressed);
-            }
+        if (TRACKED_BUTTON == 3)
+        {
+            
         }
     }
 
     // De-assert the GPIO when we leave the interrupt
     gpio_put(ISR_GPIO, 0);
+}
+
+static void play_sound(int sound)
+{
+
+    if (sound == 1)
+    {
+        current_frequency = (-1.0 / 40625) * count_0 * count_0 + 0.16 * count_0 + 1740;
+    }
+    else if (sound == 2)
+    {
+        current_frequency = (.0001183 * count_0 * count_0) + 2000;
+    }
+
+    phase_incr_main_0 = current_frequency * two32_fs;
+    // DDS phase and sine table lookup
+    phase_accum_main_0 += phase_incr_main_0;
+    if (current_amplitude_0 > int2fix15(1))
+    {
+        current_amplitude_0 = int2fix15(1);
+    }
+    DAC_output_0 = fix2int15(multfix15(current_amplitude_0,
+                                       sin_table[phase_accum_main_0 >> 24])) +
+                   2048;
+
+    // Ramp up amplitude
+    if (count_0 < ATTACK_TIME)
+    {
+        current_amplitude_0 = (current_amplitude_0 + attack_inc);
+    }
+    // Ramp down amplitude
+    else if (count_0 > BEEP_DURATION - DECAY_TIME)
+    {
+        current_amplitude_0 = (current_amplitude_0 - decay_inc);
+    }
+
+    // Mask with DAC control bits
+    DAC_data_0 = (DAC_config_chan_B | (DAC_output_0 & 0xffff));
+
+    // SPI write (no spinlock b/c of SPI buffer)
+    spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
+
+    // Increment the counter
+    count_0 += 1;
+
+    // State transition?
+    if (count_0 >= BEEP_DURATION)
+    {
+        STATE_0 = 1;
+        count_0 = 0;
+        action = false;
+        // printf("in beep: %d\n",pressed);
+    }
 }
 
 // This thread runs on core 0
