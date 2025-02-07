@@ -152,6 +152,7 @@ uint16_t DAC_data_0 ; // output value
 bool pressed = false;
 bool action = false;
 
+
 // This timer ISR is called on core 0
 static void alarm_irq(void) {      
         // Assert a GPIO when we enter the interrupt
@@ -163,13 +164,13 @@ static void alarm_irq(void) {
         // Reset the alarm register
         timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ;
         if (action) {
-            //printf("%s", "actn");
-            //if (STATE_0 == 0 && pressed) {
-        //if (STATE_0 == 0) {
-
-            //printf("%d/%d\n",count_0,BEEP_DURATION);
             // ADDITIONAL CODE 
-            current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+            // SWOOP SIGNAL 
+            // current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+
+            // CHIRP SIGNAL
+            current_frequency = (0.0001183 * count_0 * count_0) + 2000;
+
             // current_frequency = swoop_frequency_table[count_0]; 
             phase_incr_main_0 = current_frequency * two32_fs;
             // DDS phase and sine table lookup
