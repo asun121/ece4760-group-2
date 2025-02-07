@@ -174,6 +174,9 @@ static void alarm_irq(void) {
             phase_incr_main_0 = current_frequency * two32_fs;
             // DDS phase and sine table lookup
             phase_accum_main_0 += phase_incr_main_0  ;
+            if (current_amplitude_0 > int2fix15(1)){
+                current_amplitude_0 = int2fix15(1);
+            }
             DAC_output_0 = fix2int15(multfix15(current_amplitude_0,
                 sin_table[phase_accum_main_0>>24])) + 2048 ;
             
