@@ -238,9 +238,11 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
                 pressed=true;
                 break ;
             }
-            else{
+            else
+            {
                 pressed=false;
             }
+
         }
         // If we found a button . . .
         if (keypad & button) {
