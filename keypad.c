@@ -154,9 +154,9 @@ static void alarm_irq(void) {
 
         // Reset the alarm register
         timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ;
-        if (STATE_0 == 0 && action) {
-
-        //if (STATE_0 == 0 && pressed) {
+        if (action) {
+            //printf("%s", "actn");
+            //if (STATE_0 == 0 && pressed) {
         //if (STATE_0 == 0) {
 
             //printf("%d/%d\n",count_0,BEEP_DURATION);
@@ -189,20 +189,20 @@ static void alarm_irq(void) {
             if (count_0 >= BEEP_DURATION) {
                 STATE_0 = 1 ;
                 count_0 = 0 ;
-                //pressed=false;
+                action=false;
                 //printf("in beep: %d\n",pressed);
             }
         }
 
         // State transition?
-        else {
-            count_0 += 1 ;
-            if (count_0 == BEEP_REPEAT_INTERVAL) {
-                current_amplitude_0 = 0 ;
-                STATE_0 = 0 ;
-                count_0 = 0 ;
-            }
-        }
+        // else {
+        //     count_0 += 1 ;
+        //     if (count_0 == BEEP_REPEAT_INTERVAL) {
+        //         current_amplitude_0 = 0 ;
+        //         STATE_0 = 0 ;
+        //         count_0 = 0 ;
+        //     }
+        // }
 
         // De-assert the GPIO when we leave the interrupt
         gpio_put(ISR_GPIO, 0) ;
@@ -261,30 +261,40 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
         
         switch (BUTTON_STATE) {
             case 0:
+                //printf("%s", "0");
+
                 if(pressed){
                     BUTTON_STATE = 1;
                 }
                 break;
             case 1:
+                //printf("%s", "1");
+
                 if(pressed){
                     BUTTON_STATE = 2;
                     action = true;
+
                 }
                 else{
                     BUTTON_STATE = 0;
                 }
+                break;
             case 2:
-                action = false;
+                //printf("%s", "2");
 
                 if(pressed){
                     BUTTON_STATE = 2;
+
                 }
                 else{
                     BUTTON_STATE = 3;
+
                 }
                 break;
         
             case 3:
+                //printf("%s", "3");
+
                 if(pressed){
                     BUTTON_STATE = 2;
                 }
@@ -299,7 +309,7 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
             }
 
         // Print key to terminal
-        printf("\n%d", i) ;
+        //printf("\n%d", i) ;
 
         PT_YIELD_usec(30000) ;
     }
