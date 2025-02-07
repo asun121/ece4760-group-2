@@ -99,6 +99,9 @@ volatile unsigned int two32_fs = two32 / Fs;
 #define sine_table_size 256
 fix15 sin_table[sine_table_size] ;
 
+#define swoop_table_size 6500
+fix15 swoop_frequency_table[swoop_table_size] ; 
+
 // Values output to DAC
 int DAC_output_0 ;
 int DAC_output_1 ;
@@ -159,7 +162,8 @@ static void alarm_irq(void) {
         if (STATE_0 == 0 && pressed) {
             //printf("%d/%d\n",count_0,BEEP_DURATION);
             // ADDITIONAL CODE 
-            current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+            // current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+            current_frequency = swoop_frequency_table[count_0]; 
             // current_frequency = -260 * count_0 / 6500.0 + 1740; 
             phase_incr_main_0 = current_frequency * two32_fs;
             // DDS phase and sine table lookup
@@ -358,8 +362,13 @@ int main() {
          sin_table[ii] = float2fix15(2047*sin((float)ii*6.283/(float)sine_table_size));
     }
 
-    // Enable the interrupt for the alarm (we're using Alarm 0)
-    hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM) ;
+    int jj;
+    for (jj = 0; jj < swoop_table_size; jj++){
+        swoop_frequency_table[jj] = float2fix15(-260.0 * sin((float)jj * -M_PI / sine_table_size)) + 1740; 
+    }
+
+        // Enable the interrupt for the alarm (we're using Alarm 0)
+        hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
     // Associate an interrupt handler with the ALARM_IRQ
     irq_set_exclusive_handler(ALARM_IRQ, alarm_irq) ;
     // Enable the alarm interrupt
