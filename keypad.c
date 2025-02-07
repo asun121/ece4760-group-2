@@ -127,6 +127,10 @@ volatile unsigned int count_0 = 0 ;
 // button state: 0 = not pressed, 1 = maybe pressed, 2 = pressed, 3 = maybe not pressed
 volatile unsigned int BUTTON_STATE = 0 ; 
 
+// Track the pressed button
+volatile unsigned int TRACKED_BUTTON = 0 ;
+
+
 // SPI data
 uint16_t DAC_data_1 ; // output value
 uint16_t DAC_data_0 ; // output value
@@ -152,6 +156,8 @@ uint16_t DAC_data_0 ; // output value
 bool pressed = false;
 bool action = false;
 
+
+
 // This timer ISR is called on core 0
 static void alarm_irq(void) {      
         // Assert a GPIO when we enter the interrupt
@@ -162,12 +168,7 @@ static void alarm_irq(void) {
 
         // Reset the alarm register
         timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ;
-        if (action) {
-            //printf("%s", "actn");
-            //if (STATE_0 == 0 && pressed) {
-        //if (STATE_0 == 0) {
-
-            //printf("%d/%d\n",count_0,BEEP_DURATION);
+        if (action && TRACKED_BUTTON == 1) {
             // ADDITIONAL CODE 
             current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
             // current_frequency = swoop_frequency_table[count_0]; 
@@ -208,6 +209,7 @@ static void alarm_irq(void) {
                 //printf("in beep: %d\n",pressed);
             }
         }
+
 
         // State transition?
         // else {
@@ -263,6 +265,7 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
         if (keypad & button) {
             // Look for a valid keycode.
             for (i=0; i<NUMKEYS; i++) {
+                TRACKED_BUTTON = i;
                 if (keypad == keycodes[i]) break ;
             }
             // If we don't find one, report invalid keycode
