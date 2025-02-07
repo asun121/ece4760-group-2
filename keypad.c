@@ -162,9 +162,8 @@ static void alarm_irq(void) {
         if (STATE_0 == 0 && pressed) {
             //printf("%d/%d\n",count_0,BEEP_DURATION);
             // ADDITIONAL CODE 
-            // current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
-            current_frequency = swoop_frequency_table[count_0]; 
-            // current_frequency = -260 * count_0 / 6500.0 + 1740; 
+            current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
+            // current_frequency = swoop_frequency_table[count_0]; 
             phase_incr_main_0 = current_frequency * two32_fs;
             // DDS phase and sine table lookup
             phase_accum_main_0 += phase_incr_main_0  ;
