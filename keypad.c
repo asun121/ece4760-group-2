@@ -124,6 +124,9 @@ fix15 current_amplitude_1 = 0 ;         // current amplitude (modified in ISR)
 volatile unsigned int STATE_0 = 0 ;
 volatile unsigned int count_0 = 0 ;
 
+// button state: 0 = not pressed, 1 = maybe pressed, 2 = pressed, 3 = maybe not pressed
+volatile unsigned int BUTTON_STATE = 0 ; 
+
 // SPI data
 uint16_t DAC_data_1 ; // output value
 uint16_t DAC_data_0 ; // output value
@@ -146,7 +149,8 @@ uint16_t DAC_data_0 ; // output value
 //GPIO for timing the ISR
 #define ISR_GPIO 2
 
-bool pressed=false;
+bool pressed = false;
+bool action = false;
 
 // This timer ISR is called on core 0
 static void alarm_irq(void) {      
@@ -158,8 +162,11 @@ static void alarm_irq(void) {
 
         // Reset the alarm register
         timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ;
+        if (action) {
+            //printf("%s", "actn");
+            //if (STATE_0 == 0 && pressed) {
+        //if (STATE_0 == 0) {
 
-        if (STATE_0 == 0 && pressed) {
             //printf("%d/%d\n",count_0,BEEP_DURATION);
             // ADDITIONAL CODE 
             current_frequency = -260 * sin(-M_PI * count_0 / 6500.0) + 1740;
@@ -194,20 +201,20 @@ static void alarm_irq(void) {
             if (count_0 >= BEEP_DURATION) {
                 STATE_0 = 1 ;
                 count_0 = 0 ;
-                pressed=false;
+                action=false;
                 //printf("in beep: %d\n",pressed);
             }
         }
 
         // State transition?
-        else {
-            count_0 += 1 ;
-            if (count_0 == BEEP_REPEAT_INTERVAL) {
-                current_amplitude_0 = 0 ;
-                STATE_0 = 0 ;
-                count_0 = 0 ;
-            }
-        }
+        // else {
+        //     count_0 += 1 ;
+        //     if (count_0 == BEEP_REPEAT_INTERVAL) {
+        //         current_amplitude_0 = 0 ;
+        //         STATE_0 = 0 ;
+        //         count_0 = 0 ;
+        //     }
+        // }
 
         // De-assert the GPIO when we leave the interrupt
         gpio_put(ISR_GPIO, 0) ;
@@ -243,6 +250,11 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
                 pressed=true;
                 break ;
             }
+            else
+            {
+                pressed=false;
+            }
+
         }
         // If we found a button . . .
         if (keypad & button) {
@@ -256,20 +268,60 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
         // Otherwise, indicate invalid/non-pressed buttons
         else (i=-1) ;
 
+        //debounce here
+        //note: only take action when transitioning between maybe pressed to pressed state - only chirp on state transition
+        
+        switch (BUTTON_STATE) {
+            case 0:
+                //printf("%s", "0");
 
+                if(pressed){
+                    BUTTON_STATE = 1;
+                }
+                break;
+            case 1:
+                //printf("%s", "1");
 
-        // Write key to VGA
-        if (i != prev_key) {
-            prev_key = i ;
-            fillRect(250, 20, 176, 30, RED); // red box
-            sprintf(keytext, "%d", i) ;
-            setCursor(250, 20) ;
-            setTextSize(2) ;
-            writeString(keytext) ;
-        }
+                if(pressed){
+                    BUTTON_STATE = 2;
+                    action = true;
+
+                }
+                else{
+                    BUTTON_STATE = 0;
+                }
+                break;
+            case 2:
+                //printf("%s", "2");
+
+                if(pressed){
+                    BUTTON_STATE = 2;
+
+                }
+                else{
+                    BUTTON_STATE = 3;
+
+                }
+                break;
+        
+            case 3:
+                //printf("%s", "3");
+
+                if(pressed){
+                    BUTTON_STATE = 2;
+                }
+                else{
+                    BUTTON_STATE = 0;
+                }
+                break;
+        
+            default:
+                BUTTON_STATE = 0;
+                break;
+            }
 
         // Print key to terminal
-        printf("\n%d", i) ;
+        //printf("\n%d", i) ;
 
         PT_YIELD_usec(30000) ;
     }
