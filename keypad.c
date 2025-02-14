@@ -87,17 +87,17 @@ typedef signed int fix15;
 volatile unsigned int phase_accum_main_0;
 // volatile unsigned int phase_incr_main_0 = (400.0*two32)/Fs ;
 
-// ADDITIONAL CODE
+// variable accumulator instead of a fixed one
+// accumulator value changes based on current frequency
 volatile unsigned int phase_incr_main_0;
+// track the frequency (i.e. swoop/chirp)
 volatile unsigned int current_frequency;
+// variable to store 2^32 / Fs instead of calculating it every time
 volatile unsigned int two32_fs = two32 / Fs;
 
 // DDS sine table (populated in main())
 #define sine_table_size 256
 fix15 sin_table[sine_table_size];
-
-#define swoop_table_size 6500
-fix15 swoop_frequency_table[swoop_table_size];
 
 // Values output to DAC
 int DAC_output_0;
@@ -123,6 +123,8 @@ volatile unsigned int count_0 = 0;
 
 // button state: 0 = not pressed, 1 = maybe pressed, 2 = pressed, 3 = maybe not pressed
 volatile unsigned int BUTTON_STATE = 0;
+
+// Mode state: 0 = normal play sound, 1 = record sound, 2 = playback sound
 volatile unsigned int MODE = 0;
 
 // Track the pressed button
@@ -154,10 +156,14 @@ bool pressed = false;
 bool action = false;
 static void play_sound(int sound);
 
+// Playback array and variables.
+
+// Max amount of sounds we can store and play back
+#define max_sounds 50
+
 int playback_index = 0;
 int sound_index = 0;
-int sounds[50];
-
+int sounds[max_sounds];
 
 // This timer ISR is called on core 0
 static void alarm_irq(void)
@@ -171,10 +177,13 @@ static void alarm_irq(void)
     // Reset the alarm register
     timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY;
 
+    // Normal playback mode
     if (MODE == 0)
     {
+        // If a button is pressed
         if (action)
         {
+            // Play the sound associated with the button
             if (TRACKED_BUTTON == 1)
             {
                 play_sound(1);
@@ -189,6 +198,7 @@ static void alarm_irq(void)
                 play_sound(3);
             }
 
+            // If we want to start recording, enter record mode
             else if (TRACKED_BUTTON == 4)
             {
                 MODE = 1;
@@ -197,24 +207,38 @@ static void alarm_irq(void)
         }
     }
 
+    // Record mode
     else if (MODE == 1)
     {
+        // If a button is pressed
         if (action)
         {
+            // When we want to stop recording, enter playback mode
             if (TRACKED_BUTTON == 5)
             {
                 MODE = 2;
                 action = false;
             }
+
+            // Else we record the pressed button
             else
             {
-                sounds[sound_index] = TRACKED_BUTTON;
-                sound_index++;
-                action = false;
+                // If we exceed the max amount of sounds we can store, we automatically start playing back
+                if (sound_index >= max_sounds)
+                {
+                    MODE = 2;
+                }
+                else
+                {
+                    sounds[sound_index] = TRACKED_BUTTON;
+                    sound_index++;
+                    action = false;
+                }
             }
         }
     }
 
+    // Playback mode
     else
     {
         play_sound(sounds[playback_index]);
@@ -226,7 +250,7 @@ static void alarm_irq(void)
 
 static void play_sound(int sound)
 {
-
+    // Calculate the frequency based on the sound we want to play
     if (sound == 1)
     {
         current_frequency = (-1.0 / 40625) * count_0 * count_0 + 0.16 * count_0 + 1740;
@@ -271,15 +295,19 @@ static void play_sound(int sound)
     // Increment the counter
     count_0 += 1;
 
-    // State transition?
+    // State transition
     if (count_0 >= BEEP_DURATION)
     {
         STATE_0 = 1;
         count_0 = 0;
         action = false;
+
+        // If we are in playback mode and the previous sound finished, we increment to the next sound
         if (MODE == 2)
         {
             playback_index++;
+
+            // We have played all the sounds and go back to normal mode
             if (playback_index >= sound_index)
             {
                 MODE = 0;
@@ -302,7 +330,6 @@ static PT_THREAD(protothread_core_0(struct pt *pt))
 
     while (1)
     {
-
         gpio_put(LED, !gpio_get(LED));
 
         // Scan the keypad!
@@ -345,21 +372,16 @@ static PT_THREAD(protothread_core_0(struct pt *pt))
             (i = -1);
 
         // debounce here
-        // note: only take action when transitioning between maybe pressed to pressed state - only chirp on state transition
-
+        // We only take action when transitioning between maybe pressed to pressed state - only chirp on state transition
         switch (BUTTON_STATE)
         {
         case 0:
-            // printf("%s", "0");
-
             if (pressed)
             {
                 BUTTON_STATE = 1;
             }
             break;
         case 1:
-            // printf("%s", "1");
-
             if (pressed)
             {
                 BUTTON_STATE = 2;
@@ -371,8 +393,6 @@ static PT_THREAD(protothread_core_0(struct pt *pt))
             }
             break;
         case 2:
-            // printf("%s", "2");
-
             if (pressed)
             {
                 BUTTON_STATE = 2;
@@ -382,10 +402,7 @@ static PT_THREAD(protothread_core_0(struct pt *pt))
                 BUTTON_STATE = 3;
             }
             break;
-
         case 3:
-            // printf("%s", "3");
-
             if (pressed)
             {
                 BUTTON_STATE = 2;
@@ -400,10 +417,6 @@ static PT_THREAD(protothread_core_0(struct pt *pt))
             BUTTON_STATE = 0;
             break;
         }
-
-        // Print key to terminal
-        // printf("\n%d", i) ;
-
         PT_YIELD_usec(30000);
     }
     // Indicate thread end
@@ -492,12 +505,6 @@ int main()
     for (ii = 0; ii < sine_table_size; ii++)
     {
         sin_table[ii] = float2fix15(2047 * sin((float)ii * 6.283 / (float)sine_table_size));
-    }
-
-    int jj;
-    for (jj = 0; jj < swoop_table_size; jj++)
-    {
-        swoop_frequency_table[jj] = float2fix15(-260.0 * sin((float)jj * -M_PI / sine_table_size)) + 1740;
     }
 
     // Enable the interrupt for the alarm (we're using Alarm 0)
