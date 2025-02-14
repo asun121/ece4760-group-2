@@ -153,6 +153,12 @@ uint16_t DAC_data_0; // output value
 bool pressed = false;
 bool action = false;
 static void play_sound(int sound);
+
+int playback_index = 0;
+int sound_index = 0;
+int sounds[50];
+
+
 // This timer ISR is called on core 0
 static void alarm_irq(void)
 {
@@ -164,12 +170,11 @@ static void alarm_irq(void)
 
     // Reset the alarm register
     timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY;
-    if (action)
-    {
-        // ADDITIONAL CODE
-        if (TRACKED_BUTTON == 1 || TRACKED_BUTTON == 2)
-        {
 
+    if (MODE == 0)
+    {
+        if (action)
+        {
             if (TRACKED_BUTTON == 1)
             {
                 play_sound(1);
@@ -179,12 +184,40 @@ static void alarm_irq(void)
                 play_sound(2);
             }
 
-        }
+            else if (TRACKED_BUTTON == 3)
+            {
+                play_sound(3);
+            }
 
-        if (TRACKED_BUTTON == 3)
-        {
-            
+            else if (TRACKED_BUTTON == 4)
+            {
+                MODE = 1;
+                action = false;
+            }
         }
+    }
+
+    else if (MODE == 1)
+    {
+        if (action)
+        {
+            if (TRACKED_BUTTON == 5)
+            {
+                MODE = 2;
+                action = false;
+            }
+            else
+            {
+                sounds[sound_index] = TRACKED_BUTTON;
+                sound_index++;
+                action = false;
+            }
+        }
+    }
+
+    else
+    {
+        play_sound(sounds[playback_index]);
     }
 
     // De-assert the GPIO when we leave the interrupt
@@ -201,6 +234,10 @@ static void play_sound(int sound)
     else if (sound == 2)
     {
         current_frequency = (.0001183 * count_0 * count_0) + 2000;
+    }
+    else if (sound == 3)
+    {
+        current_frequency = 0;
     }
 
     phase_incr_main_0 = current_frequency * two32_fs;
@@ -240,7 +277,16 @@ static void play_sound(int sound)
         STATE_0 = 1;
         count_0 = 0;
         action = false;
-        // printf("in beep: %d\n",pressed);
+        if (MODE == 2)
+        {
+            playback_index++;
+            if (playback_index >= sound_index)
+            {
+                MODE = 0;
+                sound_index = 0;
+                playback_index = 0;
+            }
+        }
     }
 }
 
