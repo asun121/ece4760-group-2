@@ -206,12 +206,10 @@ void spawnPegs() {
         int row_offset = center_x - ((pegs_in_row - 1) * HORIZONTAL_SPACING) / 2; 
 
         for (int col = 0; col < pegs_in_row; col++) {
-            struct peg temp;
-            // Distribute pegs evenly in row
-            temp.x = int2fix15(row_offset + col * HORIZONTAL_SPACING);  
-            // Maintain vertical spacing
-            temp.y = int2fix15(START_Y_COORD + row * VERTICAL_SPACING); 
-            pegs[row][col] = temp;
+            // Distribute pegs evenly and maintain spacing
+            // direct assignment here is better than having a temp peg struct
+            pegs[row][col].x = int2fix15(row_offset + col * HORIZONTAL_SPACING);
+            pegs[row][col].y = int2fix15(START_Y_COORD + row * VERTICAL_SPACING);
         }
     }
 }
