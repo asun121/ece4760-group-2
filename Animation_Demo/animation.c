@@ -182,10 +182,6 @@ void spawnPeg(fix15* x, fix15* y)
   *y = int2fix15(240) ;
 }
 
-
-// fix15 pegs_x[NUM_ROWS][NUM_COLS];  // Store x positions of pegs
-// fix15 pegs_y[NUM_ROWS][NUM_COLS];  // Store y positions of pegs
-
 #define NUM_ROWS PEG_DEPTH
 #define NUM_COLS (640 / HORIZONTAL_SPACING)
 
@@ -213,6 +209,100 @@ void spawnPegs() {
         }
     }
 }
+
+#define NUM_BALLS 10  
+// Fixed x-position for nozzle
+#define BALL_SPAWN_X 320  
+// Fixed y-position at top
+#define BALL_SPAWN_Y 50   
+
+// Spawn multiple balls at the top of the screen
+void spawnBalls(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
+    for (int i = 0; i < NUM_BALLS; i++) {
+        // All balls start from the exact same coordinate
+        x[i] = int2fix15(BALL_SPAWN_X);  
+        y[i] = int2fix15(BALL_SPAWN_Y);  
+        vx[i] = float2fix15((float)(rand() % 200 - 100) / (float)100);  // Small random x-velocity
+        vy[i] = int2fix15(0);  // Zero initial y-velocity
+    }
+}
+
+void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
+    for (int i = 0; i < NUM_BALLS; i++) {
+        vy[i] = vy[i] + GRAVITY;  
+        // Update position
+        x[i] = x[i] + vx[i];
+        y[i] = y[i] + vy[i];
+
+        // Collision detection with pegs
+        for (int row = 0; row < NUM_ROWS; row++) {
+            for (int col = 0; col <= row; col++) {
+                fix15 dx = x[i] - pegs[row][col].x;
+                fix15 dy = y[i] - pegs[row][col].y;
+                fix15 collision_dist = int2fix15(BALL_RADIUS + PEG_RADIUS);
+                
+                // Compute exact Euclidean distance
+                fix15 distance = float2fix15(
+                    sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy)))
+                );
+                
+                // Avoid division by zero
+                if (distance != 0 && distance < collision_dist) {
+                    // Compute normal vectors
+                    fix15 normal_x = divfix(dx, distance);
+                    fix15 normal_y = divfix(dy, distance);
+                    
+                    // Compute intermediate term for collision response
+                    fix15 intermediate_term = multfix15(
+                        int2fix15(-2),
+                        multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i])
+                    );
+                    
+                    // Only reflect if moving toward peg
+                    if (intermediate_term > 0) {
+                        // Teleport ball outside collision distance
+                        x[i] = pegs[row][col].x + multfix15(normal_x, distance + int2fix15(1));
+                        y[i] = pegs[row][col].y + multfix15(normal_y, distance + int2fix15(1));
+                        
+                        // Update velocity
+                        vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
+                        vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
+                        
+                        // Apply bounciness factor
+                        vx[i] = multfix15(vx[i], BOUNCINESS);
+                        vy[i] = multfix15(vy[i], BOUNCINESS);
+                        
+                        // Play sound effect
+                        dma_start_channel_mask(1u << ctrl_chan);
+                    }
+                }
+            }
+        }
+        
+        // Handle wall collisions
+        if (hitBottom(y[i])) {
+            // Respawn at top
+            x[i] = int2fix15(BALL_SPAWN_X);
+            y[i] = int2fix15(BALL_SPAWN_Y);
+            vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
+            vy[i] = int2fix15(0);
+        } else {
+            if (hitTop(y[i])) {
+                vy[i] = -vy[i];
+                y[i] = y[i] + int2fix15(5);
+            }
+            if (hitLeft(x[i])) {
+                vx[i] = -vx[i];
+                x[i] = x[i] + int2fix15(5);
+            }
+            if (hitRight(x[i])) {
+                vx[i] = -vx[i];
+                x[i] = x[i] - int2fix15(5);
+            }
+        }
+    }
+}
+
 
 void ballsAndPegs(fix15* ball_x, fix15* ball_y, fix15* peg_x, fix15* peg_y, fix15* ball_vx, fix15* ball_vy) 
 {
