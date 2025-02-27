@@ -191,14 +191,26 @@ void spawnPeg(fix15* x, fix15* y)
 
 struct peg pegs[NUM_ROWS][NUM_COLS];
 
+#define SCREEN_WIDTH 640 
+#define SCREEN_MIDLINE_X 320
+
+// updated spawnpegs func 
 void spawnPegs() {
     for (int row = 0; row < NUM_ROWS; row++) {
-        int pegs_in_row = (row % 2 == 0) ? NUM_COLS : (NUM_COLS - 1);  // Staggered layout
-        
+        // Number of pegs in row follows Pascal's Triangle pattern
+        // Number of pegs in row increases by 1 each row starting from 1. i.e. 1-2-3-4 
+        int pegs_in_row = row + 1; 
+        // Midline of the screen
+        int center_x = SCREEN_MIDLINE_X; 
+        // Symmetric offset
+        int row_offset = center_x - ((pegs_in_row - 1) * HORIZONTAL_SPACING) / 2; 
+
         for (int col = 0; col < pegs_in_row; col++) {
             struct peg temp;
-            temp.x = int2fix15(START_X_COORD + col * HORIZONTAL_SPACING + (row % 2) * (HORIZONTAL_SPACING / 2));
-            temp.y = int2fix15(START_Y_COORD + row * VERTICAL_SPACING);
+            // Distribute pegs evenly in row
+            temp.x = int2fix15(row_offset + col * HORIZONTAL_SPACING);  
+            // Maintain vertical spacing
+            temp.y = int2fix15(START_Y_COORD + row * VERTICAL_SPACING); 
             pegs[row][col] = temp;
         }
     }
