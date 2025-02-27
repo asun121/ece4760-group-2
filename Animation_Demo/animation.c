@@ -216,6 +216,12 @@ void spawnPegs() {
 // Fixed y-position at top
 #define BALL_SPAWN_Y 50   
 
+// Arrays to store multiple ball states
+fix15 balls_x[NUM_BALLS];
+fix15 balls_y[NUM_BALLS];
+fix15 balls_vx[NUM_BALLS];
+fix15 balls_vy[NUM_BALLS];
+
 // Spawn multiple balls at the top of the screen
 void spawnBalls(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
     for (int i = 0; i < NUM_BALLS; i++) {
@@ -229,6 +235,7 @@ void spawnBalls(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
 
 void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
     for (int i = 0; i < NUM_BALLS; i++) {
+        // apply gravity
         vy[i] = vy[i] + GRAVITY;  
         // Update position
         x[i] = x[i] + vx[i];
@@ -420,11 +427,12 @@ static PT_THREAD (protothread_anim(struct pt *pt))
     // Spawn a boid
     spawnBoid(&boid0_x, &boid0_y, &boid0_vx, &boid0_vy);
     spawnPeg(&peg0_x, &peg0_y);
-    // spawnPegs(); 
-    //draw the peg
-    // drawCircle(fix2int15(peg0_x), fix2int15(peg0_y), 6, color);
 
-
+    // Uncomment for Multiball case with triangular layout
+    // // Spawn multiple balls 
+    // spawnBalls(balls_x, balls_y, balls_vx, balls_vy);
+    // // Spawn our pascal triangle layout pegs 
+    // spawnPegs();
 
     while(1) {
       // Measure time at start of thread
@@ -438,6 +446,8 @@ static PT_THREAD (protothread_anim(struct pt *pt))
       // update boid's position and velocity
       ballsAndPegs(&boid0_x, &boid0_y, &peg0_x, &peg0_y, &boid0_vx, &boid0_vy);
 
+      // // handle multiple balls interaction with pegs
+      // multiBallsAndPegs(balls_x, balls_y, balls_vx, balls_vy);
 
       // draw the boid at its new position
       fillCircle(fix2int15(boid0_x), fix2int15(boid0_y), BALL_RADIUS, color);
