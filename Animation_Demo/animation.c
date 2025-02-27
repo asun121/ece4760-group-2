@@ -100,7 +100,7 @@ typedef signed int fix15;
 #define NUM_ROWS 16
 #define NUM_COLS (640 / 38)
 
-#define NUM_BALLS 5
+#define NUM_BALLS 20
 // Fixed x-position for nozzle
 #define BALL_SPAWN_X 320
 // Fixed y-position at top
@@ -347,7 +347,7 @@ void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
         fix15 dy = y[i] - pegs[row][col].y;
         if (absfix15(dx) < collision_dist && absfix15(dy) < collision_dist)
         {
-          fillCircle(pegs[row][col].x, pegs[row][col].y, PEG_RADIUS, color);
+        //   fillCircle(pegs[row][col].x, pegs[row][col].y, PEG_RADIUS, color);
 
           // Compute exact Euclidean distance
           fix15 distance = float2fix15(
@@ -570,6 +570,7 @@ static PT_THREAD(protothread_anim(struct pt *pt))
 
     // // handle multiple balls interaction with pegs
     multiBallsAndPegs(balls_x, balls_y, balls_vx, balls_vy);
+    draw_pegs();
 
     // draw the boid at its new position
     //   fillCircle(fix2int15(boid0_x), fix2int15(boid0_y), BALL_RADIUS, color);
