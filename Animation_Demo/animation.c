@@ -233,6 +233,86 @@ void spawnBalls(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
     }
 }
 
+
+// Added ball-multipeg collsions in the same frame 
+void multiBallsAndPegs2(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
+    for (int i = 0; i < NUM_BALLS; i++) {
+        vy[i] = vy[i] + GRAVITY; 
+        x[i] = x[i] + vx[i];
+        y[i] = y[i] + vy[i];
+
+        // Track closest peg collision per frame
+        fix15 min_distance = int2fix15(99999);  
+        int closest_row = -1, closest_col = -1;
+
+        // Collision detection with pegs
+        for (int row = 0; row < NUM_ROWS; row++) {
+            for (int col = 0; col <= row; col++) {
+                fix15 dx = x[i] - pegs[row][col].x;
+                fix15 dy = y[i] - pegs[row][col].y;
+                fix15 collision_dist = int2fix15(BALL_RADIUS + PEG_RADIUS);
+                
+                // Compute exact Euclidean distance
+                fix15 distance = float2fix15(
+                    sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy)))
+                );
+                
+                // Avoid division by zero and track closest peg
+                if (distance != 0 && distance < collision_dist && distance < min_distance) {
+                    min_distance = distance;
+                    closest_row = row;
+                    closest_col = col;
+                }
+            }
+        }
+        
+        // Process only the closest peg collision
+        if (closest_row != -1 && closest_col != -1) {
+            fix15 dx = x[i] - pegs[closest_row][closest_col].x;
+            fix15 dy = y[i] - pegs[closest_row][closest_col].y;
+            fix15 distance = min_distance;
+            fix15 normal_x = divfix(dx, distance);
+            fix15 normal_y = divfix(dy, distance);
+            fix15 intermediate_term = multfix15(
+                int2fix15(-2),
+                multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i])
+            );
+            
+            if (intermediate_term > 0) {
+                x[i] = pegs[closest_row][closest_col].x + multfix15(normal_x, distance + int2fix15(1));
+                y[i] = pegs[closest_row][closest_col].y + multfix15(normal_y, distance + int2fix15(1));
+                vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
+                vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
+                vx[i] = multfix15(vx[i], BOUNCINESS);
+                vy[i] = multfix15(vy[i], BOUNCINESS);
+                dma_start_channel_mask(1u << ctrl_chan);
+            }
+        }
+        
+        // Handle wall collisions
+        if (hitBottom(y[i])) {
+            x[i] = int2fix15(BALL_SPAWN_X);
+            y[i] = int2fix15(BALL_SPAWN_Y);
+            vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
+            vy[i] = int2fix15(0);
+        } else {
+            if (hitTop(y[i])) {
+                vy[i] = -vy[i];
+                y[i] = y[i] + int2fix15(5);
+            }
+            if (hitLeft(x[i])) {
+                vx[i] = -vx[i];
+                x[i] = x[i] + int2fix15(5);
+            }
+            if (hitRight(x[i])) {
+                vx[i] = -vx[i];
+                x[i] = x[i] - int2fix15(5);
+            }
+        }
+    }
+}
+
+
 void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
     for (int i = 0; i < NUM_BALLS; i++) {
         // apply gravity
@@ -246,7 +326,6 @@ void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[]) {
             for (int col = 0; col <= row; col++) {
                 fix15 dx = x[i] - pegs[row][col].x;
                 fix15 dy = y[i] - pegs[row][col].y;
-                fix15 collision_dist = int2fix15(BALL_RADIUS + PEG_RADIUS);
                 
                 // Compute exact Euclidean distance
                 fix15 distance = float2fix15(
