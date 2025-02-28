@@ -121,6 +121,9 @@ const int VERTICAL_SPACING = 19;
 // the color of the boid
 char color = WHITE;
 
+// Keep track of fallen balls 
+int total_fallen_balls = 0;
+
 // Boid on core 0
 fix15 boid0_x;
 fix15 boid0_y;
@@ -277,7 +280,7 @@ void multiBallsAndPegs2(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
           closest_col = col;
         }
       }
-    }
+    } 
 
     // Process only the closest peg collision
     if (closest_row != -1 && closest_col != -1)
@@ -310,6 +313,8 @@ void multiBallsAndPegs2(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
       y[i] = int2fix15(BALL_SPAWN_Y);
       vx[i] =(rand() & 0xFFFF) - int2fix15(1);
       vy[i] = int2fix15(0);
+      // Update the number of fallen balls
+      total_fallen_balls++;
     }
     else
     {
@@ -535,6 +540,9 @@ void ballsAndPegs(fix15 *ball_x, fix15 *ball_y, fix15 *peg_x, fix15 *peg_y, fix1
 //   PT_END(pt);
 // } // timer thread
 
+static uint32_t last_update_time = 0;
+static uint32_t elapsed_time_sec = 0;
+
 // Animation on core 0
 static PT_THREAD(protothread_anim(struct pt *pt))
 {
@@ -574,6 +582,33 @@ static PT_THREAD(protothread_anim(struct pt *pt))
 
     // draw the boid at its new position
     //   fillCircle(fix2int15(boid0_x), fix2int15(boid0_y), BALL_RADIUS, color);
+
+
+
+    // START TEXT 
+    // Clear the previous text overlay
+    // Covers old text with a black rectangle
+    drawRect(0, 0, 200, 40, BLACK); 
+
+    // Display statistics on the top left corner of VGA
+    char buffer[50];
+
+    sprintf(buffer, "Total Active Balls: %d", NUM_BALLS);
+    drawText(buffer, 5, 5, WHITE, BLACK);
+
+    sprintf(buffer, "Total Fallen Balls: %d", total_fallen_balls);
+    drawText(buffer, 5, 15, WHITE, BLACK);
+
+    // Update once per second
+    if (time_us_32() - last_update_time >= 1000000) {  
+        elapsed_time_sec++;
+        last_update_time = time_us_32();
+    }
+
+    sprintf(buffer, "Time (since boot): %d sec", elapsed_time_sec);
+    drawText(buffer, 5, 25, WHITE, BLACK);
+    // END TEXT 
+
 
     // delay in accordance with frame rate
     spare_time = FRAME_RATE - (time_us_32() - begin_time);
