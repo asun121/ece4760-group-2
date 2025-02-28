@@ -397,13 +397,19 @@ void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
     // Handle wall collisions
     if (hitBottom(y[i]))
     {
-      // Respawn at top
-      x[i] = int2fix15(BALL_SPAWN_X);
-      y[i] = int2fix15(BALL_SPAWN_Y);
-      //vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
-      vx[i] =(rand() & 0xFFFF) - int2fix15(1);
+        // Respawn at top
+        x[i] = int2fix15(BALL_SPAWN_X);
+        y[i] = int2fix15(BALL_SPAWN_Y);
+        //vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
+        vx[i] =(rand() & 0xFFFF) - int2fix15(1);
 
-      vy[i] = int2fix15(0);
+        vy[i] = int2fix15(0);
+
+        // Update histogram
+        updateHistogram(balls_x, balls_y);
+        // Update the number of fallen balls
+        total_fallen_balls++; 
+
     }
     else
     {
@@ -627,6 +633,9 @@ static PT_THREAD(protothread_anim(struct pt *pt))
 
 
     // START TEXT 
+    // Draw histogram
+    drawHistogram();
+    
     // Clear the previous text overlay
     // Covers old text with a black rectangle
     drawRect(0, 0, 200, 40, BLACK); 
