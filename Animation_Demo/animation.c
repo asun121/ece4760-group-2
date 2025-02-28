@@ -189,6 +189,7 @@ void spawnPeg(fix15 *x, fix15 *y)
 struct peg pegs[NUM_ROWS][NUM_COLS];
 
 #define SCREEN_WIDTH 640
+#define SCREEN_HEIGHT 480
 #define SCREEN_MIDLINE_X 320
 
 // updated spawnpegs func
@@ -507,6 +508,46 @@ void ballsAndPegs(fix15 *ball_x, fix15 *ball_y, fix15 *peg_x, fix15 *peg_y, fix1
   // Update position
   *ball_x = *ball_x + *ball_vx;
   *ball_y = *ball_y + *ball_vy;
+}
+
+// Update the histogram at the base of the screen
+#define NUM_BINS (NUM_ROWS + 1)
+#define HISTOGRAM_HEIGHT 100  
+
+// Keep track of counts for each bin
+int bin_counts[NUM_BINS] = {0};  
+
+int START_X = 320 - ((NUM_ROWS * HORIZONTAL_SPACING) / 2) + (HORIZONTAL_SPACING / 2);
+
+void updateHistogram(fix15 x[], fix15 y[]) {
+    for (int i = 0; i < NUM_BALLS; i++) {
+        if (hitBottom(y[i])) {
+            // Determine bin index based on x position
+            int bin_index = (fix2int15(x[i]) - START_X) / HORIZONTAL_SPACING;
+            if (bin_index >= 0 && bin_index < NUM_BINS) {
+                bin_counts[bin_index]++;
+            }
+        }
+    }
+}
+
+// Draw the histogram at the bottom of the VGA
+void drawHistogram() {
+    // Normalize the histogram based on max bin count value
+    int max_count = 1;  
+    for (int i = 0; i < NUM_BINS; i++) {
+        if (bin_counts[i] > max_count) {
+            max_count = bin_counts[i];
+        }
+    }
+
+    int bar_width = HORIZONTAL_SPACING - 2;  // Leave some space between bars
+    for (int i = 0; i < NUM_BINS; i++) {
+        int bar_height = (bin_counts[i] * HISTOGRAM_HEIGHT) / max_count;
+        int bar_x = START_X_COORD + i * HORIZONTAL_SPACING;
+        int bar_y = SCREEN_HEIGHT - bar_height;
+        drawRect(bar_x, bar_y, bar_width, bar_height, GREEN);
+    }
 }
 
 // ==================================================
