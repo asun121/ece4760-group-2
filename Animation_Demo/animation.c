@@ -39,6 +39,8 @@
 #include "hardware/pll.h"
 #include "hardware/dma.h"
 #include "hardware/spi.h"
+#include "hardware/adc.h"
+
 // Include protothreads
 #include "pt_cornell_rp2040_v1_3.h"
 
@@ -100,29 +102,38 @@ typedef signed int fix15;
 #define NUM_ROWS 16
 #define NUM_COLS (640 / 38)
 
-#define NUM_BALLS 20
+#define NUM_BALLS 2000
 // Fixed x-position for nozzle
 #define BALL_SPAWN_X 320
 // Fixed y-position at top
 #define BALL_SPAWN_Y 50
 
+#define LED_PIN 25
+
 //=== ===
 // Define constants
-const int BALL_RADIUS = 4;
+const int BALL_RADIUS = 1;
 const int PEG_RADIUS = 6;
 
 const fix15 collision_dist = int2fix15(BALL_RADIUS + PEG_RADIUS);
 const fix15 GRAVITY = float2fix15(0.75);
-const fix15 BOUNCINESS = float2fix15(0.5);
+// const fix15 BOUNCINESS = float2fix15(0.5);
+fix15 BOUNCINESS = float2fix15(0.6);
 
 const int HORIZONTAL_SPACING = 38;
 const int VERTICAL_SPACING = 19;
 
 // the color of the boid
 char color = WHITE;
+char peg_color = BLUE;
+char balls_color = WHITE;
+char hist_color_1 = GREEN;
+char hist_color_2 = GREEN;
+char text_color = GREEN;
+int text_size = 1;
 
-// Keep track of fallen balls 
-int total_fallen_balls = 0;
+// 0 for balls, 1 for bounciness
+int MODE = 0;
 
 // Boid on core 0
 fix15 boid0_x;
@@ -140,6 +151,7 @@ struct ball
   fix15 y;
   fix15 vx;
   fix15 vy;
+  bool counted;
 };
 
 struct peg
@@ -148,23 +160,39 @@ struct peg
   fix15 y;
 };
 
-void spawnBall(fix15 *x, fix15 *y, fix15 *vx, fix15 *vy)
-{
-  // Start in center of screen
-  *x = int2fix15(BALL_SPAWN_X);
-  *y = int2fix15(BALL_SPAWN_Y);
-  // Choose left or right
-  fix15 temp_vx = float2fix15((float)(rand() % 200 - 100) / (float)100);
-  if (temp_vx == 0)
-  {
-    temp_vx = 100002;
-  }
-  // printf("temp_vx = %d\n", fix2float15(temp_vx));
-  *vx = temp_vx;
-  //*vx = int2fix15(0);
-  // Moving down
-  *vy = int2fix15(0);
-}
+static uint32_t last_update_time = 0;
+static uint32_t elapsed_time_sec = 0;
+
+struct peg pegs[NUM_ROWS][NUM_COLS];
+
+#define SCREEN_WIDTH 640
+#define SCREEN_MIDLINE_X 320
+
+// Arrays to store multiple ball states
+fix15 balls_x[NUM_BALLS];
+fix15 balls_y[NUM_BALLS];
+fix15 balls_vx[NUM_BALLS];
+fix15 balls_vy[NUM_BALLS];
+bool counted[NUM_BALLS];
+
+#define PEGS_BOTTOM START_Y_COORD + 15 * VERTICAL_SPACING
+#define HIST_OFFSET SCREEN_MIDLINE_X - (15 * HORIZONTAL_SPACING) / 2
+#define HIST_MAX 50
+#define FONT_SIZE 10
+
+fix15 hist_highest = 0;
+
+fix15 hist_data[15] = {int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0)};
+// fix15 hist_data[15]={int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10)};
+
+// ADC conversion, num_Balls is the total balls
+const float conversion_factor = (float)(NUM_BALLS) / (1 << 12);
+int spawned_balls = 0;
+fix15 total_balls = 0;
+
+const float bounce_conversion = 0.0002;
+
+int prev_spawned = 0;
 
 // Create a boid
 void spawnBoid(fix15 *x, fix15 *y, fix15 *vx, fix15 *vy)
@@ -185,12 +213,6 @@ void spawnPeg(fix15 *x, fix15 *y)
   *x = int2fix15(320);
   *y = int2fix15(240);
 }
-
-struct peg pegs[NUM_ROWS][NUM_COLS];
-
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 480
-#define SCREEN_MIDLINE_X 320
 
 // updated spawnpegs func
 void spawnPegs()
@@ -221,16 +243,10 @@ void draw_pegs()
   {
     for (int col = 0; col <= row; col++)
     {
-      fillCircle(fix2int15(pegs[row][col].x), fix2int15(pegs[row][col].y), PEG_RADIUS, WHITE);
+      fillCircle(fix2int15(pegs[row][col].x), fix2int15(pegs[row][col].y), PEG_RADIUS, peg_color);
     }
   }
 }
-
-// Arrays to store multiple ball states
-fix15 balls_x[NUM_BALLS];
-fix15 balls_y[NUM_BALLS];
-fix15 balls_vx[NUM_BALLS];
-fix15 balls_vy[NUM_BALLS];
 
 // Spawn multiple balls at the top of the screen
 void spawnBalls(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
@@ -242,353 +258,176 @@ void spawnBalls(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
     y[i] = int2fix15(BALL_SPAWN_Y);
     vx[i] = (rand() & 0xFFFF) - int2fix15(1); // Random x-velocity
     vy[i] = int2fix15(0);                     // Zero initial y-velocity
-  }
-}
-
-// Added ball-multipeg collsions in the same frame
-void multiBallsAndPegs2(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
-{
-  for (int i = 0; i < NUM_BALLS; i++)
-  {
-    //fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, BLACK);
-
-    vy[i] = vy[i] + GRAVITY;
-    x[i] = x[i] + vx[i];
-    y[i] = y[i] + vy[i];
-
-    // Track closest peg collision per frame
-    fix15 min_distance = int2fix15(99999);
-    int closest_row = -1, closest_col = -1;
-
-    // Collision detection with pegs
-    for (int row = 0; row < NUM_ROWS; row++)
-    {
-      for (int col = 0; col <= row; col++)
-      {
-        fix15 dx = x[i] - pegs[row][col].x;
-        fix15 dy = y[i] - pegs[row][col].y;
-        fix15 collision_dist = int2fix15(BALL_RADIUS + PEG_RADIUS);
-
-        // Compute exact Euclidean distance
-        fix15 distance = float2fix15(
-            sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy))));
-
-        // Avoid division by zero and track closest peg
-        if (distance != 0 && distance < min_distance)
-        {
-          min_distance = distance;
-          closest_row = row;
-          closest_col = col;
-        }
-      }
-    } 
-
-    // Process only the closest peg collision
-    if (closest_row != -1 && closest_col != -1)
-    {
-      fix15 dx = x[i] - pegs[closest_row][closest_col].x;
-      fix15 dy = y[i] - pegs[closest_row][closest_col].y;
-      fix15 distance = min_distance;
-      fix15 normal_x = divfix(dx, distance);
-      fix15 normal_y = divfix(dy, distance);
-      fix15 intermediate_term = multfix15(
-          int2fix15(-2),
-          multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i]));
-
-      if (intermediate_term > 0)
-      {
-        x[i] = pegs[closest_row][closest_col].x + multfix15(normal_x, distance + int2fix15(1));
-        y[i] = pegs[closest_row][closest_col].y + multfix15(normal_y, distance + int2fix15(1));
-        vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
-        vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
-        vx[i] = multfix15(vx[i], BOUNCINESS);
-        vy[i] = multfix15(vy[i], BOUNCINESS);
-        dma_start_channel_mask(1u << ctrl_chan);
-      }
-    }
-
-    // Handle wall collisions
-    if (hitBottom(y[i]))
-    {
-      x[i] = int2fix15(BALL_SPAWN_X);
-      y[i] = int2fix15(BALL_SPAWN_Y);
-      vx[i] =(rand() & 0xFFFF) - int2fix15(1);
-      vy[i] = int2fix15(0);
-      // Update the number of fallen balls
-      total_fallen_balls++;
-    }
-    else
-    {
-      if (hitTop(y[i]))
-      {
-        vy[i] = -vy[i];
-        y[i] = y[i] + int2fix15(5);
-      }
-      if (hitLeft(x[i]))
-      {
-        vx[i] = -vx[i];
-        x[i] = x[i] + int2fix15(5);
-      }
-      if (hitRight(x[i]))
-      {
-        vx[i] = -vx[i];
-        x[i] = x[i] - int2fix15(5);
-      }
-    }
-    fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, color);
+    counted[i] = false;
   }
 }
 
 void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
 {
+  bool active;
   for (int i = 0; i < NUM_BALLS; i++)
   {
-    fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, BLACK);
-    // Collision detection with pegs
-    for (int row = 0; row < NUM_ROWS; row++)
+    active = i < spawned_balls;
+    // erase ball
+    if (active)
     {
-      for (int col = 0; col <= row; col++)
+      // fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, BLACK);
+      fillRect(fix2int15(x[i]), fix2int15(y[i]), 2,2, BLACK);
+      // Collision detection with pegs
+      for (int row = 0; row < NUM_ROWS; row++)
       {
-        fix15 dx = x[i] - pegs[row][col].x;
-        fix15 dy = y[i] - pegs[row][col].y;
-        if (absfix15(dx) < collision_dist && absfix15(dy) < collision_dist)
+        for (int col = 0; col <= row; col++)
         {
-        //   fillCircle(pegs[row][col].x, pegs[row][col].y, PEG_RADIUS, color);
-
-          // Compute exact Euclidean distance
-          fix15 distance = float2fix15(
-              sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy))));
-
-          // Avoid division by zero
-          if (distance != 0)
+          fix15 dx = x[i] - pegs[row][col].x;
+          fix15 dy = y[i] - pegs[row][col].y;
+          if (absfix15(dx) < collision_dist && absfix15(dy) < collision_dist)
           {
-            // Compute normal vectors
-            fix15 normal_x = divfix(dx, distance);
-            fix15 normal_y = divfix(dy, distance);
+            //   fillCircle(pegs[row][col].x, pegs[row][col].y, PEG_RADIUS, color);
 
-            // Compute intermediate term for collision response
-            fix15 intermediate_term = multfix15(
-                int2fix15(-2),
-                multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i]));
+            // Compute exact Euclidean distance
+            fix15 distance = float2fix15(
+                sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy))));
 
-            // Only reflect if moving toward peg
-            if (intermediate_term > 0)
+            // Avoid division by zero
+            if (distance != 0)
             {
-              // Teleport ball outside collision distance
-              x[i] = pegs[row][col].x + multfix15(normal_x, distance + int2fix15(1));
-              y[i] = pegs[row][col].y + multfix15(normal_y, distance + int2fix15(1));
+              // Compute normal vectors
+              fix15 normal_x = divfix(dx, distance);
+              fix15 normal_y = divfix(dy, distance);
 
-              // Update velocity
-              vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
-              vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
+              // Compute intermediate term for collision response
+              fix15 intermediate_term = multfix15(
+                  int2fix15(-2),
+                  multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i]));
 
-              // Apply bounciness factor
-              vx[i] = multfix15(vx[i], BOUNCINESS);
-              vy[i] = multfix15(vy[i], BOUNCINESS);
+              // Only reflect if moving toward peg
+              if (intermediate_term > 0)
+              {
+                // Teleport ball outside collision distance
+                x[i] = pegs[row][col].x + multfix15(normal_x, distance + int2fix15(1));
+                y[i] = pegs[row][col].y + multfix15(normal_y, distance + int2fix15(1));
 
-              // Play sound effect
-              dma_start_channel_mask(1u << ctrl_chan);
+                // Update velocity
+                vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
+                vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
+
+                // Apply bounciness factor
+                vx[i] = multfix15(vx[i], BOUNCINESS);
+                vy[i] = multfix15(vy[i], BOUNCINESS);
+
+                // Play sound effect
+                dma_start_channel_mask(1u << ctrl_chan);
+              }
             }
           }
         }
       }
-    }
 
-    // Handle wall collisions
-    if (hitBottom(y[i]))
-    {
+      if (!counted[i] && y[i] > int2fix15(PEGS_BOTTOM))
+      {
+        fix15 hi = ((x[i] - int2fix15(HIST_OFFSET)) / int2fix15(HORIZONTAL_SPACING));
+        // int hi = (x[i]) / HORIZONTAL_SPACING;
+        //  printf("%d\n",hi);
+        if (hi > -1 && hi < 15)
+        {
+          hist_data[hi]++;
+          if (hist_data[hi] > hist_highest)
+            hist_highest = hist_data[hi];
+        }
+
+        counted[i] = true;
+      }
+
+      // Handle wall collisions
+      if (hitBottom(y[i]))
+      {
+        counted[i] = false;
+        total_balls++;
         // Respawn at top
         x[i] = int2fix15(BALL_SPAWN_X);
         y[i] = int2fix15(BALL_SPAWN_Y);
-        //vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
-        vx[i] =(rand() & 0xFFFF) - int2fix15(1);
+        // vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
+        vx[i] = (rand() & 0xFFFF) - int2fix15(1);
 
         vy[i] = int2fix15(0);
-
-        // Update histogram
-        updateHistogram(balls_x, balls_y);
-        // Update the number of fallen balls
-        total_fallen_balls++; 
+      }
+      else
+      {
+        if (hitTop(y[i]))
+        {
+          vy[i] = -vy[i];
+          y[i] = y[i] + int2fix15(5);
+        }
+        if (hitLeft(x[i]))
+        {
+          vx[i] = -vx[i];
+          x[i] = x[i] + int2fix15(5);
+        }
+        if (hitRight(x[i]))
+        {
+          vx[i] = -vx[i];
+          x[i] = x[i] - int2fix15(5);
+        }
+      }
+      // apply gravity
+      vy[i] = vy[i] + GRAVITY;
+      // Update position
+      x[i] = x[i] + vx[i];
+      y[i] = y[i] + vy[i];
+      //fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, balls_color);
+      fillRect(fix2int15(x[i]), fix2int15(y[i]), 2,2, balls_color);
 
     }
-    else
-    {
-      if (hitTop(y[i]))
-      {
-        vy[i] = -vy[i];
-        y[i] = y[i] + int2fix15(5);
-      }
-      if (hitLeft(x[i]))
-      {
-        vx[i] = -vx[i];
-        x[i] = x[i] + int2fix15(5);
-      }
-      if (hitRight(x[i]))
-      {
-        vx[i] = -vx[i];
-        x[i] = x[i] - int2fix15(5);
-      }
-    }
-    // apply gravity
-    vy[i] = vy[i] + GRAVITY;
-    // Update position
-    x[i] = x[i] + vx[i];
-    y[i] = y[i] + vy[i];
-    fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, color);
   }
 }
 
-void ballsAndPegs(fix15 *ball_x, fix15 *ball_y, fix15 *peg_x, fix15 *peg_y, fix15 *ball_vx, fix15 *ball_vy)
+void showHist()
 {
-
-  // Calculate distances between ball and peg
-  fix15 dx = *ball_x - *peg_x;
-  fix15 dy = *ball_y - *peg_y;
-
-  // Check collision (using fixed-point math)
-  if (absfix15(dx) < collision_dist && absfix15(dy) < collision_dist)
+  for (int i = 0; i < 15; i++)
   {
-    // Distance between ball and peg
-    fix15 distance = float2fix15(
-        sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy))));
-    // Avoid division by zero
-    if (distance != 0)
+    fix15 h = HIST_MAX * fix2float15(hist_data[i]) / fix2float15(hist_highest);
+
+    fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - h, HORIZONTAL_SPACING - 2, h, hist_color_1);
+    fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - HIST_MAX, HORIZONTAL_SPACING - 2, HIST_MAX - h, BLACK);
+  }
+}
+
+void eraseAllBalls()
+{
+  for (int i = 0; i < NUM_BALLS; i++)
+  {
+    // fillCircle(balls_x[i],balls_y[i],BALL_RADIUS,BLACK);
+    fillCircle(fix2int15(balls_x[i]), fix2int15(balls_y[i]), BALL_RADIUS, BLACK);
+  }
+}
+
+void changeSpawnedNum()
+{
+  if (spawned_balls != prev_spawned)
+  {
+    if (spawned_balls < prev_spawned)
     {
-      // Compute normal vectors from peg to ball
-      fix15 normal_x = divfix(dx, distance);
-      fix15 normal_y = divfix(dy, distance);
-
-      // Compute intermediate term for collision physics
-      fix15 intermediate_term = multfix15(
-          int2fix15(-2),
-          multfix15(normal_x, *ball_vx) + multfix15(normal_y, *ball_vy));
-
-      // Check if vectors are in opposite directions
-      if (intermediate_term > 0)
+      // fillRect(0,0,SCREEN_WIDTH, 480,BLACK);
+      eraseAllBalls();
+      prev_spawned = spawned_balls;
+    }
+    else if (spawned_balls > prev_spawned)
+    {
+      for (int i = prev_spawned; i < spawned_balls; i++)
       {
-        // Teleport ball outside collision distance
-        *ball_x = *peg_x + multfix15(normal_x, distance + int2fix15(1));
-        *ball_y = *peg_y + multfix15(normal_y, distance + int2fix15(1));
-        // Update velocity
-        *ball_vx = *ball_vx + multfix15(normal_x, intermediate_term);
-        *ball_vy = *ball_vy + multfix15(normal_y, intermediate_term);
+        counted[i] = false;
+        // Respawn at top
+        balls_x[i] = int2fix15(BALL_SPAWN_X);
+        balls_y[i] = int2fix15(BALL_SPAWN_Y);
+        // vx[i] = float2fix15((float)(rand() % 200 - 100) / 100.0);
+        balls_vx[i] = (rand() & 0xFFFF) - int2fix15(1);
 
-        dma_start_channel_mask(1u << ctrl_chan);
-
-        // Apply bounciness factor
-        *ball_vx = multfix15(*ball_vx, BOUNCINESS);
-        *ball_vy = multfix15(*ball_vy, BOUNCINESS);
+        balls_vy[i] = int2fix15(0);
       }
     }
+    prev_spawned = spawned_balls;
   }
-
-  // Handle wall collisions
-  if (hitBottom(*ball_y))
-  {
-    // Respawn at top
-    spawnBoid(ball_x, ball_y, ball_vx, ball_vy);
-  }
-  else
-  {
-    // Handle other wall collisions
-    if (hitTop(*ball_y))
-    {
-      *ball_vy = -(*ball_vy);
-      *ball_y = *ball_y + int2fix15(5);
-    }
-    if (hitLeft(*ball_x))
-    {
-      *ball_vx = -(*ball_vx);
-      *ball_x = *ball_x + int2fix15(5);
-    }
-    if (hitRight(*ball_x))
-    {
-      *ball_vx = -(*ball_vx);
-      *ball_x = *ball_x - int2fix15(5);
-    }
-  }
-
-  // Apply gravity
-  *ball_vy = *ball_vy + GRAVITY;
-
-  // Update position
-  *ball_x = *ball_x + *ball_vx;
-  *ball_y = *ball_y + *ball_vy;
 }
-
-// Update the histogram at the base of the screen
-#define NUM_BINS (NUM_ROWS + 1)
-#define HISTOGRAM_HEIGHT 100  
-
-// Keep track of counts for each bin
-int bin_counts[NUM_BINS] = {0};  
-
-int START_X = 320 - ((NUM_ROWS * HORIZONTAL_SPACING) / 2) + (HORIZONTAL_SPACING / 2);
-
-void updateHistogram(fix15 x[], fix15 y[]) {
-    for (int i = 0; i < NUM_BALLS; i++) {
-        if (hitBottom(y[i])) {
-            // Determine bin index based on x position
-            int bin_index = (fix2int15(x[i]) - START_X) / HORIZONTAL_SPACING;
-            if (bin_index >= 0 && bin_index < NUM_BINS) {
-                bin_counts[bin_index]++;
-            }
-        }
-    }
-}
-
-// Draw the histogram at the bottom of the VGA
-void drawHistogram() {
-    // Normalize the histogram based on max bin count value
-    int max_count = 1;  
-    for (int i = 0; i < NUM_BINS; i++) {
-        if (bin_counts[i] > max_count) {
-            max_count = bin_counts[i];
-        }
-    }
-
-    int bar_width = HORIZONTAL_SPACING - 2;  // Leave some space between bars
-    for (int i = 0; i < NUM_BINS; i++) {
-        int bar_height = (bin_counts[i] * HISTOGRAM_HEIGHT) / max_count;
-        int bar_x = START_X_COORD + i * HORIZONTAL_SPACING;
-        int bar_y = SCREEN_HEIGHT - bar_height;
-        drawRect(bar_x, bar_y, bar_width, bar_height, GREEN);
-    }
-}
-
-// ==================================================
-// === users serial input thread
-// ==================================================
-// static PT_THREAD (protothread_serial(struct pt *pt))
-// {
-//     PT_BEGIN(pt);
-//     // stores user input
-//     static int user_input ;
-//     // wait for 0.1 sec
-//     PT_YIELD_usec(1000000) ;
-//     // announce the threader version
-//     sprintf(pt_serial_out_buffer, "Protothreads RP2040 v1.0\n\r");
-//     // non-blocking write
-//     serial_write ;
-//       while(1) {
-//         // print prompt
-//         sprintf(pt_serial_out_buffer, "input a number in the range 1-15: ");
-//         // non-blocking write
-//         serial_write ;
-//         // spawn a thread to do the non-blocking serial read
-//         serial_read ;
-//         // convert input string to number
-//         sscanf(pt_serial_in_buffer,"%d", &user_input) ;
-//         // update boid color
-//         if ((user_input > 0) && (user_input < 16)) {
-//           color = (char)user_input ;
-//         }
-//       } // END WHILE(1)
-//   PT_END(pt);
-// } // timer thread
-
-static uint32_t last_update_time = 0;
-static uint32_t elapsed_time_sec = 0;
 
 // Animation on core 0
 static PT_THREAD(protothread_anim(struct pt *pt))
@@ -600,67 +439,117 @@ static PT_THREAD(protothread_anim(struct pt *pt))
   static int begin_time;
   static int spare_time;
 
-  // Spawn a boid
-  // spawnBoid(&boid0_x, &boid0_y, &boid0_vx, &boid0_vy);
-  // spawnPeg(&peg0_x, &peg0_y);
-  // Uncomment for Multiball case with triangular layout
-  // // Spawn multiple balls
+  // Spawn multiple balls
   spawnBalls(balls_x, balls_y, balls_vx, balls_vy);
-  // // Spawn our pascal triangle layout pegs
+  // Spawn and draw our pascal triangle layout pegs
   spawnPegs();
   draw_pegs();
+  // Set text attributes
+  setTextColor2(text_color, BLACK);
+  setTextSize(text_size);
+
+  char temp[50];
+
+  static uint32_t frames = 0;
+
+  bool last_button_state = false; // Track previous button state
+
+  while (1)
+  {
+    frames++;
+    // Measure time at start of thread
+    begin_time = time_us_32();
+
+    changeSpawnedNum();
+
+    // // handle multiple balls interaction with pegs
+    multiBallsAndPegs(balls_x, balls_y, balls_vx, balls_vy);
+    // showHist();
+
+    // TEXT START
+
+    // Covers old text with a black rectangle
+    // fillRect(0, 0, 200, 40, BLACK);
+
+    setCursor(5, 5);
+    sprintf(temp, "Total Active Balls: %d     ", spawned_balls);
+    writeString(temp);
+
+    setCursor(5, 15);
+    sprintf(temp, "Total Fallen Balls: %d     ", total_balls);
+    writeString(temp);
+
+    // Update once per second
+    if (time_us_32() - last_update_time >= 1000000)
+    {
+      elapsed_time_sec++;
+      last_update_time = time_us_32();
+    }
+
+    setCursor(5, 25);
+    sprintf(temp, "Time (since boot):  %d", frames);
+    writeString(temp);
+
+    setCursor(5, 35);
+    sprintf(temp, "Bounciness :  %d", BOUNCINESS);
+    writeString(temp);
+
+    // TEXT END
+
+    // Check ADC value
+    // 12-bit conversion, assume max value == ADC_VREF == 3.3 V
+    // if(MODE == 0)
+    // {
+    spawned_balls = spawned_balls + (((int)(adc_read() * conversion_factor) - (int)spawned_balls) >> 6);
+    // }
+    // else if(MODE == 1)
+    // {
+    //   BOUNCINESS = float2fix15(adc_read() * bounce_conversion);
+    // }
+
+    // bool button_state = gpio_get(14);  // Read button state
+
+    // Detect button press (rising edge)
+    // if (button_state && !last_button_state) {
+    //     MODE = !MODE;  // Toggle mode
+    // }
+
+    // last_button_state = button_state;  // Update last button state
+
+    // delay in accordance with frame rate
+    spare_time = FRAME_RATE - (time_us_32() - begin_time);
+    if (spare_time < 0)
+    {
+      gpio_put(LED_PIN, 1);
+    }
+    else
+    {
+      gpio_put(LED_PIN, 0);
+    }
+    // yield for necessary amount of time
+    PT_YIELD_usec(spare_time);
+    // NEVER exit while
+  } // END WHILE(1)
+  PT_END(pt);
+} // animation thread
+
+// Animation on core 1
+static PT_THREAD(protothread_anim1(struct pt *pt))
+{
+  // Mark beginning of thread
+  PT_BEGIN(pt);
+  // Variables for maintaining frame rate
+  static int begin_time;
+  static int spare_time;
 
   while (1)
   {
     // Measure time at start of thread
     begin_time = time_us_32();
     // erase boid
-    // drawRect(fix2int15(boid0_x), fix2int15(boid0_y), 2, 2, BLACK);
-    // fillCircle(fix2int15(peg0_x), fix2int15(peg0_y), PEG_RADIUS, color);
-    //fillRect(0, 0, 640, 480, BLACK);
-    //draw_pegs();
-
-    // update boid's position and velocity
-    // ballsAndPegs(&boid0_x, &boid0_y, &peg0_x, &peg0_y, &boid0_vx, &boid0_vy);
-
-    // // handle multiple balls interaction with pegs
-    multiBallsAndPegs(balls_x, balls_y, balls_vx, balls_vy);
+    showHist();
     draw_pegs();
 
-    // draw the boid at its new position
-    //   fillCircle(fix2int15(boid0_x), fix2int15(boid0_y), BALL_RADIUS, color);
-
-
-
-    // START TEXT 
-    // Draw histogram
-    drawHistogram();
-    
-    // Clear the previous text overlay
-    // Covers old text with a black rectangle
-    drawRect(0, 0, 200, 40, BLACK); 
-
-    // Display statistics on the top left corner of VGA
-    char buffer[50];
-
-    sprintf(buffer, "Total Active Balls: %d", NUM_BALLS);
-    drawText(buffer, 5, 5, WHITE, BLACK);
-
-    sprintf(buffer, "Total Fallen Balls: %d", total_fallen_balls);
-    drawText(buffer, 5, 15, WHITE, BLACK);
-
-    // Update once per second
-    if (time_us_32() - last_update_time >= 1000000) {  
-        elapsed_time_sec++;
-        last_update_time = time_us_32();
-    }
-
-    sprintf(buffer, "Time (since boot): %d sec", elapsed_time_sec);
-    drawText(buffer, 5, 25, WHITE, BLACK);
-    // END TEXT 
-
-
-    // delay in accordance with frame rate
     spare_time = FRAME_RATE - (time_us_32() - begin_time);
     // yield for necessary amount of time
     PT_YIELD_usec(spare_time);
@@ -668,6 +557,14 @@ static PT_THREAD(protothread_anim(struct pt *pt))
   } // END WHILE(1)
   PT_END(pt);
 } // animation thread
+
+void core1_main()
+{
+  // Add animation thread
+  pt_add_thread(protothread_anim1);
+  // Start the scheduler
+  pt_schedule_start;
+}
 
 // ========================================
 // === main
@@ -677,6 +574,11 @@ int main()
 {
   // initialize stio
   stdio_init_all();
+
+  // Set up the button as an input with an internal pull-down resistor
+  gpio_init(14);
+  gpio_set_dir(14, GPIO_IN);
+  gpio_pull_down(14);
 
   // initialize VGA
   initVGA();
@@ -694,6 +596,11 @@ int main()
   gpio_set_function(PIN_CS, GPIO_FUNC_SPI);
   gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
   gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
+
+  // Initialize the LED pin
+  gpio_init(LED_PIN);
+  // Configure the LED pin as an output
+  gpio_set_dir(LED_PIN, GPIO_OUT);
 
   // Build sine table and DAC data table
   int i;
@@ -751,8 +658,23 @@ int main()
 
   //================
 
+  //============= ADC ============================
+  adc_init();
+
+  // Make sure GPIO is high-impedance, no pullups etc
+  adc_gpio_init(26);
+
+  // Select ADC input 0 (GPIO26)
+  adc_select_input(0);
+
+  //===================================================================
+
+  // start core 1
+  multicore_reset_core1();
+  multicore_launch_core1(&core1_main);
+
   // add threads
-  // pt_add_thread(protothread_serial);
+  pt_add_thread(protothread_anim1);
   pt_add_thread(protothread_anim);
 
   // start scheduler
