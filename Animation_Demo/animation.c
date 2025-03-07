@@ -387,12 +387,13 @@ void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
 
 void showHist()
 {
+  char temp2[50];
+
   for (int i = 0; i < 15; i++)
   {
     fix15 h = HIST_MAX * fix2float15(hist_data[i]) / fix2float15(hist_highest);
-
     // fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - h, HORIZONTAL_SPACING - 2, h, hist_color_1);
-    // fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - HIST_MAX, HORIZONTAL_SPACING - 2, HIST_MAX - h, BLACK);
+    // fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - HIST_MAX, HORIZONTAL_SPACING - 2, HIST_MAX - h, BLACK)
 
     drawRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - hist_h_prev[i], HORIZONTAL_SPACING - 2, hist_h_prev[i], BLACK);
     drawRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - h, HORIZONTAL_SPACING - 2, h, hist_color_1);
@@ -520,6 +521,12 @@ static PT_THREAD(protothread_anim(struct pt *pt))
     {
       elapsed_time_sec++;
       last_update_time = time_us_32();
+
+      for(int i=0;i<15;i++)
+      {
+        printf("%f ", fix2float15(hist_data[i]));
+      }
+      printf("\n");
       
       setCursor(5, 25);
       sprintf(temp, "Time (since boot):  %d", elapsed_time_sec);
