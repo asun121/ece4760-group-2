@@ -102,7 +102,7 @@ typedef signed int fix15;
 #define NUM_ROWS 16
 #define NUM_COLS (640 / 38)
 
-#define NUM_BALLS 2000
+#define NUM_BALLS 5000
 // Fixed x-position for nozzle
 #define BALL_SPAWN_X 320
 // Fixed y-position at top
@@ -183,15 +183,14 @@ bool counted[NUM_BALLS];
 fix15 hist_highest = 0;
 
 fix15 hist_data[15] = {int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0)};
-// fix15 hist_data[15]={int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10),int2fix15(0),int2fix15(10)};
-
+fix15 hist_h_prev[15] = {int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0), int2fix15(0)};
 // ADC conversion, num_Balls is the total balls
 const float conversion_factor = (float)(NUM_BALLS) / (1 << 12);
 int spawned_balls = 0;
 fix15 total_balls = 0;
 
 const float bounce_conversion = 0.0002;
-
+const float bounce_float_conversion = 0.00003051757;
 int prev_spawned = 0;
 
 // Create a boid
@@ -205,13 +204,6 @@ void spawnBoid(fix15 *x, fix15 *y, fix15 *vx, fix15 *vy)
   *vx = temp_vx;
 
   *vy = int2fix15(0);
-}
-
-void spawnPeg(fix15 *x, fix15 *y)
-{
-  // Start in center of screen
-  *x = int2fix15(320);
-  *y = int2fix15(240);
 }
 
 // updated spawnpegs func
@@ -272,62 +264,75 @@ void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
     if (active)
     {
       // fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, BLACK);
-      fillRect(fix2int15(x[i]), fix2int15(y[i]), 2,2, BLACK);
+      fillRect(fix2int15(x[i]), fix2int15(y[i]), 2, 2, BLACK);
       // Collision detection with pegs
-      for (int row = 0; row < NUM_ROWS; row++)
+
+      int row = (fix2int15(y[i]) - (START_Y_COORD)+9) / 19;
+      if(row<0)
+        row=0;
+      if(row>15)
+        row=15;
+      
+      // for (int row = 0; row < NUM_ROWS; row++)
+      // {
+      for (int col = 0; col <= row; col++)
       {
-        for (int col = 0; col <= row; col++)
+        fix15 dx = x[i] - pegs[row][col].x;
+        fix15 dy = y[i] - pegs[row][col].y;
+        if (absfix15(dx) < collision_dist && absfix15(dy) < collision_dist)
         {
-          fix15 dx = x[i] - pegs[row][col].x;
-          fix15 dy = y[i] - pegs[row][col].y;
-          if (absfix15(dx) < collision_dist && absfix15(dy) < collision_dist)
+          //   fillCircle(pegs[row][col].x, pegs[row][col].y, PEG_RADIUS, color);
+          // fix15 abs_dx = absfix15(dx);
+          // fix15 abs_dy = absfix15(dy);
+          // fix15 max_val = (abs_dx > abs_dy) ? abs_dx : abs_dy;
+          // fix15 min_val = (abs_dx > abs_dy) ? abs_dy : abs_dx;
+
+          // fix15 distance = multfix15(max_val, int2fix15(1)) + multfix15(min_val, float2fix15(0.5));
+          // Improved approximation (3/8 instead of 0.5)
+          // fix15 distance = max_val + multfix15(int2fix15(3), min_val) >> 3);
+
+          // Compute exact Euclidean distance
+          fix15 distance = float2fix15(
+              sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy))));
+
+          // Avoid division by zero
+          if (distance != 0)
           {
-            //   fillCircle(pegs[row][col].x, pegs[row][col].y, PEG_RADIUS, color);
+            // Compute normal vectors
+            fix15 normal_x = divfix(dx, distance);
+            fix15 normal_y = divfix(dy, distance);
 
-            // Compute exact Euclidean distance
-            fix15 distance = float2fix15(
-                sqrt(fix2float15(multfix15(dx, dx) + multfix15(dy, dy))));
+            // Compute intermediate term for collision response
+            fix15 intermediate_term = multfix15(
+                int2fix15(-2),
+                multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i]));
 
-            // Avoid division by zero
-            if (distance != 0)
+            // Only reflect if moving toward peg
+            if (intermediate_term > 0)
             {
-              // Compute normal vectors
-              fix15 normal_x = divfix(dx, distance);
-              fix15 normal_y = divfix(dy, distance);
+              // Teleport ball outside collision distance
+              x[i] = pegs[row][col].x + multfix15(normal_x, distance + int2fix15(1));
+              y[i] = pegs[row][col].y + multfix15(normal_y, distance + int2fix15(1));
 
-              // Compute intermediate term for collision response
-              fix15 intermediate_term = multfix15(
-                  int2fix15(-2),
-                  multfix15(normal_x, vx[i]) + multfix15(normal_y, vy[i]));
+              // Update velocity
+              vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
+              vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
 
-              // Only reflect if moving toward peg
-              if (intermediate_term > 0)
-              {
-                // Teleport ball outside collision distance
-                x[i] = pegs[row][col].x + multfix15(normal_x, distance + int2fix15(1));
-                y[i] = pegs[row][col].y + multfix15(normal_y, distance + int2fix15(1));
+              // Apply bounciness factor
+              vx[i] = multfix15(vx[i], BOUNCINESS);
+              vy[i] = multfix15(vy[i], BOUNCINESS);
 
-                // Update velocity
-                vx[i] = vx[i] + multfix15(normal_x, intermediate_term);
-                vy[i] = vy[i] + multfix15(normal_y, intermediate_term);
-
-                // Apply bounciness factor
-                vx[i] = multfix15(vx[i], BOUNCINESS);
-                vy[i] = multfix15(vy[i], BOUNCINESS);
-
-                // Play sound effect
-                dma_start_channel_mask(1u << ctrl_chan);
-              }
+              // Play sound effect
+              dma_start_channel_mask(1u << ctrl_chan);
             }
           }
         }
       }
+      // }
 
-      if (!counted[i] && y[i] > int2fix15(PEGS_BOTTOM))
+      if (!counted[i] && y[i] > int2fix15(PEGS_BOTTOM) && x[i]>int2fix15(HIST_OFFSET))
       {
-        fix15 hi = ((x[i] - int2fix15(HIST_OFFSET)) / int2fix15(HORIZONTAL_SPACING));
-        // int hi = (x[i]) / HORIZONTAL_SPACING;
-        //  printf("%d\n",hi);
+        int hi = ((fix2int15(x[i]) - (HIST_OFFSET)) / (HORIZONTAL_SPACING));
         if (hi > -1 && hi < 15)
         {
           hist_data[hi]++;
@@ -374,9 +379,8 @@ void multiBallsAndPegs(fix15 x[], fix15 y[], fix15 vx[], fix15 vy[])
       // Update position
       x[i] = x[i] + vx[i];
       y[i] = y[i] + vy[i];
-      //fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, balls_color);
-      fillRect(fix2int15(x[i]), fix2int15(y[i]), 2,2, balls_color);
-
+      // fillCircle(fix2int15(x[i]), fix2int15(y[i]), BALL_RADIUS, balls_color);
+      fillRect(fix2int15(x[i]), fix2int15(y[i]), 2, 2, balls_color);
     }
   }
 }
@@ -387,8 +391,12 @@ void showHist()
   {
     fix15 h = HIST_MAX * fix2float15(hist_data[i]) / fix2float15(hist_highest);
 
-    fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - h, HORIZONTAL_SPACING - 2, h, hist_color_1);
-    fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - HIST_MAX, HORIZONTAL_SPACING - 2, HIST_MAX - h, BLACK);
+    // fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - h, HORIZONTAL_SPACING - 2, h, hist_color_1);
+    // fillRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - HIST_MAX, HORIZONTAL_SPACING - 2, HIST_MAX - h, BLACK);
+
+    drawRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - hist_h_prev[i], HORIZONTAL_SPACING - 2, hist_h_prev[i], BLACK);
+    drawRect(HIST_OFFSET + i * HORIZONTAL_SPACING + 2, 480 - h, HORIZONTAL_SPACING - 2, h, hist_color_1);
+    hist_h_prev[i] = h;
   }
 }
 
@@ -397,7 +405,8 @@ void eraseAllBalls()
   for (int i = 0; i < NUM_BALLS; i++)
   {
     // fillCircle(balls_x[i],balls_y[i],BALL_RADIUS,BLACK);
-    fillCircle(fix2int15(balls_x[i]), fix2int15(balls_y[i]), BALL_RADIUS, BLACK);
+    // fillCircle(fix2int15(balls_x[i]), fix2int15(balls_y[i]), BALL_RADIUS, BLACK);
+    fillRect(fix2int15(balls_x[i]), fix2int15(balls_y[i]), 2, 2, BLACK);
   }
 }
 
@@ -429,6 +438,8 @@ void changeSpawnedNum()
   }
 }
 
+int last_button_state = 1; // Track previous button state
+
 // Animation on core 0
 static PT_THREAD(protothread_anim(struct pt *pt))
 {
@@ -440,10 +451,13 @@ static PT_THREAD(protothread_anim(struct pt *pt))
   static int spare_time;
 
   // Spawn multiple balls
+  // At reset spawn max number of balls
+  spawned_balls = NUM_BALLS;
+
   spawnBalls(balls_x, balls_y, balls_vx, balls_vy);
-  // Spawn and draw our pascal triangle layout pegs
+  // // Spawn and draw our pascal triangle layout pegs
   spawnPegs();
-  draw_pegs();
+  //draw_pegs();
   // Set text attributes
   setTextColor2(text_color, BLACK);
   setTextSize(text_size);
@@ -452,13 +466,10 @@ static PT_THREAD(protothread_anim(struct pt *pt))
 
   static uint32_t frames = 0;
 
-  bool last_button_state = false; // Track previous button state
-
   while (1)
   {
     frames++;
 
-    
     // Measure time at start of thread
     begin_time = time_us_32();
 
@@ -473,6 +484,28 @@ static PT_THREAD(protothread_anim(struct pt *pt))
     // Covers old text with a black rectangle
     // fillRect(0, 0, 200, 40, BLACK);
 
+
+    // TEXT END
+
+    // Check ADC value
+    // 12-bit conversion, assume max value == ADC_VREF == 3.3 V
+    // printf("%d\n",MODE);
+    if (MODE == 1)
+    {
+      spawned_balls = spawned_balls + (((int)(adc_read() * conversion_factor) - (int)spawned_balls) >> 6);
+    }
+    else if (MODE == 2)
+    {
+      BOUNCINESS = float2fix15(adc_read() * bounce_conversion);
+      // Update bounciness smoothly instead of changin
+      // BOUNCINESS = BOUNCINESS + (((float2fix15(adc_read() * bounce_conversion)) - BOUNCINESS) >> 3);
+
+    }
+
+    // Read button state
+    int button_state = gpio_get(14);
+
+    
     setCursor(5, 5);
     sprintf(temp, "Total Active Balls: %d     ", spawned_balls);
     writeString(temp);
@@ -480,43 +513,43 @@ static PT_THREAD(protothread_anim(struct pt *pt))
     setCursor(5, 15);
     sprintf(temp, "Total Fallen Balls: %d     ", total_balls);
     writeString(temp);
+    
 
     // Update once per second
     if (time_us_32() - last_update_time >= 1000000)
     {
       elapsed_time_sec++;
       last_update_time = time_us_32();
+      
+      setCursor(5, 25);
+      sprintf(temp, "Time (since boot):  %d", elapsed_time_sec);
+      writeString(temp);
+
+      setCursor(5, 35);
+      sprintf(temp, "Bounciness :  %f", fix2float15(BOUNCINESS));
+      writeString(temp);
+
+      // Display current state
+      setCursor(5, 45);
+      sprintf(temp, "State:  %d", MODE);
+      writeString(temp);
     }
 
-    setCursor(5, 25);
-    sprintf(temp, "Time (since boot):  %d", frames);
-    writeString(temp);
-
-    setCursor(5, 35);
-    sprintf(temp, "Bounciness :  %d", BOUNCINESS);
-    writeString(temp);
-
-    // TEXT END
-
-    // Check ADC value
-    // 12-bit conversion, assume max value == ADC_VREF == 3.3 V
-    // if(MODE == 0)
-    // {
-    spawned_balls = spawned_balls + (((int)(adc_read() * conversion_factor) - (int)spawned_balls) >> 6);
-    // }
-    // else if(MODE == 1)
-    // {
-    //   BOUNCINESS = float2fix15(adc_read() * bounce_conversion);
-    // }
-
-    // bool button_state = gpio_get(14);  // Read button state
-
     // Detect button press (rising edge)
-    // if (button_state && !last_button_state) {
-    //     MODE = !MODE;  // Toggle mode
-    // }
+    if (button_state && !last_button_state)
+    {
+      // MODE = !MODE;  // Toggle mode
+      total_balls = 0;
+      hist_highest = 0;
+      for (int i = 0; i < 15; i++)
+        hist_data[i] = 0;
+      // Change mode
+      MODE++;
+      if (MODE > 2)
+        MODE = 0;
+    }
 
-    // last_button_state = button_state;  // Update last button state
+    last_button_state = button_state; // Update last button state
 
     // delay in accordance with frame rate
     spare_time = FRAME_RATE - (time_us_32() - begin_time);
@@ -543,16 +576,21 @@ static PT_THREAD(protothread_anim1(struct pt *pt))
   // Variables for maintaining frame rate
   static int begin_time;
   static int spare_time;
-
+  spawnPegs();
+  // draw_pegs();
   while (1)
   {
     // Measure time at start of thread
     begin_time = time_us_32();
     // erase boid
     showHist();
+    // spawnBalls(balls_x, balls_y, balls_vx, balls_vy);
+    //  Spawn and draw our pascal triangle layout pegs
+    // draw_pegs();
     draw_pegs();
 
     spare_time = FRAME_RATE - (time_us_32() - begin_time);
+
     // yield for necessary amount of time
     PT_YIELD_usec(spare_time);
     // NEVER exit while
@@ -574,13 +612,14 @@ void core1_main()
 // USE ONLY C-sdk library
 int main()
 {
+  set_sys_clock_khz(250000, true);
   // initialize stio
   stdio_init_all();
 
   // Set up the button as an input with an internal pull-down resistor
   gpio_init(14);
   gpio_set_dir(14, GPIO_IN);
-  gpio_pull_down(14);
+  gpio_pull_up(14);
 
   // initialize VGA
   initVGA();
