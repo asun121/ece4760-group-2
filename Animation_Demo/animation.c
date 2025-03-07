@@ -457,6 +457,8 @@ static PT_THREAD(protothread_anim(struct pt *pt))
   while (1)
   {
     frames++;
+
+    
     // Measure time at start of thread
     begin_time = time_us_32();
 
@@ -544,13 +546,11 @@ static PT_THREAD(protothread_anim1(struct pt *pt))
 
   while (1)
   {
-    frames++;
     // Measure time at start of thread
     begin_time = time_us_32();
     // erase boid
     showHist();
     draw_pegs();
-    showHist();
 
     spare_time = FRAME_RATE - (time_us_32() - begin_time);
     // yield for necessary amount of time
