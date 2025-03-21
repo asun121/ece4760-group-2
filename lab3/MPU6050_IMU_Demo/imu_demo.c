@@ -67,6 +67,14 @@ fix15 filtered_ay = 0, filtered_az = 0;
 fix15 error = 0;
 fix15 target_angle;
 
+
+// fix15 error_integral = 0;
+// fix15 dt = float2fix15(0.001); 
+// // change this value later to adjust the maximum integral term 
+// fix15 max_integral = int2fix15(1000); 
+// // Rate of change of error
+// fix15 error_derivative = 0; 
+
 // GPIO we're using for PWM
 #define PWM_OUT 4
 
@@ -115,6 +123,28 @@ void on_pwm_wrap()
     complementary_angle = multfix15(complementary_angle + gyro_angle_delta, zeropt999) + multfix15(accel_angle, zeropt001);
 
     error = target_angle - complementary_angle;
+
+    // // I-term: Calculate integral term (with anti-windup)
+    // error_integral = error_integral + multfix15(error, dt);
+    // // limit the integral term to prevent excessive buildup
+    // if (error_integral > max_integral)
+    //     error_integral = max_integral;
+    // if (error_integral < -max_integral)
+    //     error_integral = -max_integral;
+
+    // // D-term: Calculate derivative term
+    // error_derivative = divfix15(error - error_previous, dt);
+    // error_previous = error;  // Store current error for next cycle
+
+    // // Calculate complete PID control output
+    // fix15 p_term = multfix15(kp, error);
+    // fix15 i_term = multfix15(ki, error_integral);
+    // fix15 d_term = multfix15(kd, error_derivative);
+    
+    // // Combine all terms (p, i, d)
+    // fix15 pid_output = p_term + i_term + d_term;
+    // control = fix2int15(pid_output);
+
     control = fix2int15(multfix15(kp, error));
     control = min(max(control, 0), 5000); // Clamp to 0-5000
     // Update duty cycle
