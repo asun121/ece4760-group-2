@@ -71,9 +71,10 @@ fix15 target_angle;
 // fix15 error_integral = 0;
 // fix15 dt = float2fix15(0.001); 
 // // change this value later to adjust the maximum integral term 
-// fix15 max_integral = int2fix15(1000); 
+// fix15 max_integral = int2fix15(1000); // 5000? 
 // // Rate of change of error
 // fix15 error_derivative = 0; 
+// fix15 error_previous = 0; 
 
 // GPIO we're using for PWM
 #define PWM_OUT 4
@@ -146,7 +147,7 @@ void on_pwm_wrap()
     // control = fix2int15(pid_output);
 
     control = fix2int15(multfix15(kp, error));
-    control = min(max(control, 0), 5000); // Clamp to 0-5000
+    control = min(max(control, 0), 3000); // Clamp to 0-3000
     // Update duty cycle
     if (control != old_control)
     {
@@ -184,13 +185,13 @@ static PT_THREAD(protothread_vga(struct pt *pt))
     drawHLine(75, 355, 5, CYAN);
     drawHLine(75, 280, 5, CYAN);
     drawVLine(80, 280, 150, CYAN);
-    sprintf(screentext, "0");
+    sprintf(screentext, "2500");
     setCursor(50, 350);
     writeString(screentext);
-    sprintf(screentext, "+2");
+    sprintf(screentext, "5000");
     setCursor(50, 280);
     writeString(screentext);
-    sprintf(screentext, "-2");
+    sprintf(screentext, "0");
     setCursor(50, 425);
     writeString(screentext);
 
@@ -226,6 +227,8 @@ static PT_THREAD(protothread_vga(struct pt *pt))
             drawVLine(xcoord, 0, 480, BLACK);
 
             // Draw bottom plot (multiply by 120 to scale from +/-2 to +/-250)
+            
+            drawPixel(xcoord, 430 - (int)(NewRange * ((float)(control) / 5000.0)), WHITE);
             // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[0]) * 120.0) - OldMin) / OldRange)), WHITE);
             // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(complementary_angle) * 120.0) - OldMin) / OldRange)), WHITE);
 
