@@ -62,7 +62,24 @@ static struct pt_sem vga_semaphore;
 #define CLKDIV 25.0
 uint slice_num;
 fix15 accel_angle, gyro_angle_delta, complementary_angle = 0;
-fix15 filtered_ay=0, filtered_az=0;
+fix15 filtered_ay = 0, filtered_az = 0;
+
+fix15 error = 0;
+fix15 target_angle;
+
+// GPIO we're using for PWM
+#define PWM_OUT 4
+
+// Variable to hold PWM slice number
+uint slice_num;
+
+// PWM duty cycle
+volatile int control;
+volatile int old_control;
+
+fix15 kp = float2fix15(40.0);
+fix15 ki = float2fix15(0.0);
+fix15 kd = float2fix15(0.0);
 
 // Interrupt service routine
 void on_pwm_wrap()
@@ -74,26 +91,38 @@ void on_pwm_wrap()
     // NOTE! This is in 15.16 fixed point. Accel in g's, gyro in deg/s
     // If you want these values in floating point, call fix2float15() on
     // the raw measurements.
-   mpu6050_read_raw(acceleration, gyro);
-
+    mpu6050_read_raw(acceleration, gyro);
 
     // Accelerometer angle (degrees - 15.16 fixed point)
     // Only ONE of the two lines below will be used, depending whether or not a small angle approximation is appropriate
 
     // SMALL ANGLE APPROXIMATION
-   // accel_angle = multfix15(divfix(acceleration[0], acceleration[1]), oneeightyoverpi);
+    // accel_angle = multfix15(divfix(acceleration[0], acceleration[1]), oneeightyoverpi);
     // NO SMALL ANGLE APPROXIMATION
-  
-   filtered_ay = filtered_ay + ((acceleration[1] - filtered_ay)>>6) ;
-   filtered_az = filtered_az + ((acceleration[2] - filtered_az)>>6) ; 
-   // ccel_angle = multfix15(float2fix15(atan2(-fix2float15(acceleration[2]), fix2float15(acceleration[1]))), oneeightyoverpi) + int2fix15(180);
 
+    filtered_ay = filtered_ay + ((acceleration[1] - filtered_ay) >> 6);
+    filtered_az = filtered_az + ((acceleration[2] - filtered_az) >> 6);
+    // ccel_angle = multfix15(float2fix15(atan2(-fix2float15(acceleration[2]), fix2float15(acceleration[1]))), oneeightyoverpi) + int2fix15(180);
 
-   accel_angle = multfix15(float2fix15(atan2(-fix2float15(filtered_az), fix2float15(filtered_ay))), oneeightyoverpi) + int2fix15(180);    // Gyro angle delta (measurement times timestep) (15.16 fixed point)
-   gyro_angle_delta = multfix15(gyro[0], zeropt001);
+    accel_angle = multfix15(float2fix15(atan2(-fix2float15(filtered_az), fix2float15(filtered_ay))), oneeightyoverpi) + int2fix15(180); // Gyro angle delta (measurement times timestep) (15.16 fixed point)
+    if (fix2int15(accel_angle) > 270)
+    {
+        accel_angle = accel_angle - int2fix15(360);
+    }
+    gyro_angle_delta = multfix15(gyro[0], zeropt001);
 
     // Complementary angle (degrees - 15.16 fixed point)
-   complementary_angle = multfix15(complementary_angle + gyro_angle_delta, zeropt999) + multfix15(accel_angle, zeropt001);
+    complementary_angle = multfix15(complementary_angle + gyro_angle_delta, zeropt999) + multfix15(accel_angle, zeropt001);
+
+    error = target_angle - complementary_angle;
+    control = fix2int15(multfix15(kp, error));
+    control = min(max(control, 0), 5000); // Clamp to 0-5000
+    // Update duty cycle
+    if (control != old_control)
+    {
+        old_control = control;
+        pwm_set_chan_level(slice_num, PWM_CHAN_A, control);
+    }
     // Signal VGA to draw
     PT_SEM_SIGNAL(pt, &vga_semaphore);
 }
@@ -152,10 +181,9 @@ static PT_THREAD(protothread_vga(struct pt *pt))
 
     while (true)
     {
-        //printf("%f\n",fix2float15(complementary_angle));
-        // Wait on semaphore
+        // printf("%f\n",fix2float15(complementary_angle));
+        //  Wait on semaphore
         PT_SEM_WAIT(pt, &vga_semaphore);
-        printf("%f\n",fix2float15(complementary_angle));
         // Increment drawspeed controller
         throttle += 1;
         // If the controller has exceeded a threshold, draw
@@ -167,20 +195,19 @@ static PT_THREAD(protothread_vga(struct pt *pt))
             // Erase a column
             drawVLine(xcoord, 0, 480, BLACK);
 
-            //Draw bottom plot (multiply by 120 to scale from +/-2 to +/-250)
-            //drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[0]) * 120.0) - OldMin) / OldRange)), WHITE);
-            //drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(complementary_angle) * 120.0) - OldMin) / OldRange)), WHITE);
+            // Draw bottom plot (multiply by 120 to scale from +/-2 to +/-250)
+            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[0]) * 120.0) - OldMin) / OldRange)), WHITE);
+            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(complementary_angle) * 120.0) - OldMin) / OldRange)), WHITE);
 
-            //drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[1]) * 120.0) - OldMin) / OldRange)), RED);
-            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[2]) * 120.0) - OldMin) / OldRange)), GREEN);
+            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[1]) * 120.0) - OldMin) / OldRange)), RED);
+            //  drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[2]) * 120.0) - OldMin) / OldRange)), GREEN);
 
             // // Draw top plot
-            //drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[0]))-OldMin) / OldRange)), WHITE);
+            // drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[0]))-OldMin) / OldRange)), WHITE);
 
             drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(complementary_angle))-OldMin) / OldRange)), WHITE);
             // drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[1]))-OldMin) / OldRange)), RED);
-            // drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[2]))-OldMin) / OldRange)), GREEN);
-
+            //  drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[2]))-OldMin) / OldRange)), GREEN);
 
             // Update horizontal cursor
             if (xcoord < 609)
@@ -200,32 +227,85 @@ static PT_THREAD(protothread_vga(struct pt *pt))
 // User input thread. User can change draw speed
 static PT_THREAD(protothread_serial(struct pt *pt))
 {
+
+    // PT_END(pt);
     PT_BEGIN(pt);
-    static char classifier;
     static int test_in;
-    static float float_in;
+    static int angle;
+    static float p, i, d;
+    ;
     while (1)
     {
-        sprintf(pt_serial_out_buffer, "input a command: ");
+        // chose a value to change
+        // sprintf(pt_serial_out_buffer, "What do you want to tune? (a, p, i or d): ");
+        // serial_write;
+        // // spawn a thread to do the non-blocking serial read
+        // serial_read;
+        // if (pt_serial_in_buffer[0] == 'a')
+        // {
+        //     // spawn a thread to do the non-blocking serial read
+        //     serial_read;
+        //     // convert input string to number
+        //     sscanf(pt_serial_in_buffer, "%d", &angle);
+        //     if (angle > 180)
+        //         continue;
+        //     else if (angle < 0)
+        //         continue;
+        //     else
+        //         target_angle = int2fix15(angle);
+        // }
+        // else if (pt_serial_in_buffer[0] == 'p')
+        // {
+        //     serial_read;
+        //     // convert input string to number
+        //     sscanf(pt_serial_in_buffer, "%f", &p);
+        //     kp = float2fix15(p);
+        // }
+        // else if (pt_serial_in_buffer[0] == 'i')
+        // {
+        //     serial_read;
+        //     // convert input string to number
+        //     sscanf(pt_serial_in_buffer, "%f", &i);
+        //     ki = float2fix15(i);
+        // }
+        // else if (pt_serial_in_buffer[0] == 'd')
+        // {
+        //     serial_read;
+        //     // convert input string to number
+        //     sscanf(pt_serial_in_buffer, "%f", &d);
+        //     kd = float2fix15(d);
+        // }
+        // else
+        // {
+        //     printf("Invalid input. Please enter a valid option.\n");
+        //     continue;
+        // }
+        sprintf(pt_serial_out_buffer, "Chose a target angle (0-180): ");
         serial_write;
         // spawn a thread to do the non-blocking serial read
         serial_read;
         // convert input string to number
-        sscanf(pt_serial_in_buffer, "%c", &classifier);
+        sscanf(pt_serial_in_buffer, "%d", &angle);
+        if (angle > 180)
+            continue;
+        else if (angle < 0)
+            continue;
+        else
+            target_angle = int2fix15(angle);
 
-        // num_independents = test_in ;
-        if (classifier == 't')
-        {
-            sprintf(pt_serial_out_buffer, "timestep: ");
-            serial_write;
-            serial_read;
-            // convert input string to number
-            sscanf(pt_serial_in_buffer, "%d", &test_in);
-            if (test_in > 0)
-            {
-                threshold = test_in;
-            }
-        }
+        sprintf(pt_serial_out_buffer, "Chose a P, I, D: ");
+        serial_write;
+        // spawn a thread to do the non-blocking serial read
+        serial_read;
+        // convert input string to number
+        sscanf(pt_serial_in_buffer, "%f %f %f", &p);
+
+        kp = float2fix15(p);
+        ki = float2fix15(i);
+        kd = float2fix15(d);
+
+
+
     }
     PT_END(pt);
 }
@@ -280,6 +360,8 @@ int main()
     // This section configures the period of the PWM signals
     pwm_set_wrap(slice_num, WRAPVAL);
     pwm_set_clkdiv(slice_num, CLKDIV);
+
+    pwm_set_output_polarity(slice_num, 1, 0);
 
     // This sets duty cycle
     pwm_set_chan_level(slice_num, PWM_CHAN_B, 0);
