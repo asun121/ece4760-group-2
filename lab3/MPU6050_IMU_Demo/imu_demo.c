@@ -65,16 +65,15 @@ fix15 accel_angle, gyro_angle_delta, complementary_angle = 0;
 fix15 filtered_ay = 0, filtered_az = 0;
 
 fix15 error = 0;
-fix15 target_angle;
+fix15 target_angle = int2fix15(5);
 
-
-// fix15 error_integral = 0;
-// fix15 dt = float2fix15(0.001); 
-// // change this value later to adjust the maximum integral term 
-// fix15 max_integral = int2fix15(1000); // 5000? 
-// // Rate of change of error
-// fix15 error_derivative = 0; 
-// fix15 error_previous = 0; 
+fix15 error_integral = 0;
+fix15 dt = float2fix15(0.001);
+// change this value later to adjust the maximum integral term
+fix15 max_integral = int2fix15(3000); // 5000?
+// Rate of change of error
+fix15 error_derivative = 0;
+fix15 error_previous = 0;
 
 // GPIO we're using for PWM
 #define PWM_OUT 4
@@ -83,12 +82,17 @@ fix15 target_angle;
 uint slice_num;
 
 // PWM duty cycle
-volatile int control;
-volatile int old_control;
+volatile int control=0;
+volatile int old_control=0;
+int motor_disp = 0;
 
-fix15 kp = float2fix15(40.0);
-fix15 ki = float2fix15(0.0);
-fix15 kd = float2fix15(0.0);
+
+fix15 kp = float2fix15(80.0);
+fix15 ki = float2fix15(20.0);
+fix15 kd = float2fix15(50000.0);
+fix15 p_term = 0;
+fix15 i_term = 0;
+fix15 d_term = 0;
 
 // Interrupt service routine
 void on_pwm_wrap()
@@ -125,29 +129,34 @@ void on_pwm_wrap()
 
     error = target_angle - complementary_angle;
 
-    // // I-term: Calculate integral term (with anti-windup)
-    // error_integral = error_integral + multfix15(error, dt);
-    // // limit the integral term to prevent excessive buildup
-    // if (error_integral > max_integral)
-    //     error_integral = max_integral;
-    // if (error_integral < -max_integral)
-    //     error_integral = -max_integral;
+    // I-term: Calculate integral term (with anti-windup)
+    // if ((control > 0 && fix2int15(error) > 0) || (control < 0 && fix2int15(error) < 0))
+    // {
+    error_integral = error_integral + multfix15(error, dt);
+    // }
 
-    // // D-term: Calculate derivative term
-    // error_derivative = divfix15(error - error_previous, dt);
-    // error_previous = error;  // Store current error for next cycle
+    // D-term: Calculate derivative term
+    error_derivative = divfix(error_previous - complementary_angle, dt);
+    error_previous = complementary_angle; // Store current error for next cycle
 
-    // // Calculate complete PID control output
-    // fix15 p_term = multfix15(kp, error);
-    // fix15 i_term = multfix15(ki, error_integral);
-    // fix15 d_term = multfix15(kd, error_derivative);
-    
-    // // Combine all terms (p, i, d)
-    // fix15 pid_output = p_term + i_term + d_term;
-    // control = fix2int15(pid_output);
+    // Calculate complete PID control output
+    p_term = multfix15(kp, error);
+    i_term = multfix15(ki, error_integral);
+    d_term = multfix15(kd, error_derivative);
 
-    control = fix2int15(multfix15(kp, error));
-    control = min(max(control, 0), 3000); // Clamp to 0-3000
+
+    // limit the integral term to prevent excessive buildup
+    if (i_term > max_integral)
+        i_term = max_integral;
+    if (i_term < -max_integral)
+        i_term = -max_integral;
+
+    // Combine all terms (p, i, d)
+    fix15 pid_output = p_term + i_term + d_term;
+    // fix15 pid_output = p_term + d_term;
+
+    // control = fix2int15(multfix15(kp, error));
+    control = min(max(fix2int15(pid_output), 0), 3000); // Clamp to 0-3000
     // Update duty cycle
     if (control != old_control)
     {
@@ -157,6 +166,7 @@ void on_pwm_wrap()
     // Signal VGA to draw
     PT_SEM_SIGNAL(pt, &vga_semaphore);
 }
+
 
 // Thread that draws to VGA display
 static PT_THREAD(protothread_vga(struct pt *pt))
@@ -172,6 +182,7 @@ static PT_THREAD(protothread_vga(struct pt *pt))
     static float NewRange = 150.; // (looks nice on VGA)
     static float OldMin = -250.;
     static float OldMax = 250.;
+
 
     // Control rate of drawing
     static int throttle;
@@ -226,9 +237,17 @@ static PT_THREAD(protothread_vga(struct pt *pt))
             // Erase a column
             drawVLine(xcoord, 0, 480, BLACK);
 
+            // printf("%d, %d\n",control, motor_disp);
+
             // Draw bottom plot (multiply by 120 to scale from +/-2 to +/-250)
-            
-            drawPixel(xcoord, 430 - (int)(NewRange * ((float)(control) / 5000.0)), WHITE);
+            motor_disp = motor_disp + ((control - motor_disp)>>6) ;
+
+
+            drawPixel(xcoord, 430 - (int)(NewRange * ((float)(motor_disp) / 5000.0)), WHITE);
+            drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(p_term) / 5000.0)), RED);
+            drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(i_term) / 5000.0)), GREEN);
+            drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(d_term) / 5000.0)), BLUE);
+            // printf("%f,%f,%f, %f, %f\n", fix2float15(p_term), fix2float15(i_term), fix2float15(d_term), fix2float15(complementary_angle), fix2float15(error));
             // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[0]) * 120.0) - OldMin) / OldRange)), WHITE);
             // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(complementary_angle) * 120.0) - OldMin) / OldRange)), WHITE);
 
@@ -313,12 +332,12 @@ static PT_THREAD(protothread_serial(struct pt *pt))
         //     printf("Invalid input. Please enter a valid option.\n");
         //     continue;
         // }
-        sprintf(pt_serial_out_buffer, "Chose a target angle (0-180): ");
+        sprintf(pt_serial_out_buffer, "Choose a target angle (0-180) and P I D: ");
         serial_write;
         // spawn a thread to do the non-blocking serial read
         serial_read;
         // convert input string to number
-        sscanf(pt_serial_in_buffer, "%d", &angle);
+        sscanf(pt_serial_in_buffer, "%d %f %f %f", &angle, &p, &i, &d);
         if (angle > 180)
             continue;
         else if (angle < 0)
@@ -326,19 +345,20 @@ static PT_THREAD(protothread_serial(struct pt *pt))
         else
             target_angle = int2fix15(angle);
 
-        sprintf(pt_serial_out_buffer, "Chose a P, I, D: ");
-        serial_write;
-        // spawn a thread to do the non-blocking serial read
-        serial_read;
-        // convert input string to number
-        sscanf(pt_serial_in_buffer, "%f %f %f", &p);
-
         kp = float2fix15(p);
         ki = float2fix15(i);
         kd = float2fix15(d);
 
+        // sprintf(pt_serial_out_buffer, "Chose a P, I, D: ");
+        // serial_write;
+        // // spawn a thread to do the non-blocking serial read
+        // serial_read;
+        // // convert input string to number
+        // sscanf(pt_serial_in_buffer, "%f %f %f", &p, &i, &d);
 
-
+        // kp = float2fix15(p);
+        // ki = float2fix15(i);
+        // kd = float2fix15(d);
     }
     PT_END(pt);
 }
