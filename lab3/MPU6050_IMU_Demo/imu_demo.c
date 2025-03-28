@@ -69,8 +69,7 @@ fix15 target_angle = int2fix15(5);
 
 fix15 error_integral = 0;
 fix15 dt = float2fix15(0.001);
-// change this value later to adjust the maximum integral term
-fix15 max_integral = int2fix15(3000); // 5000?
+fix15 max_integral = int2fix15(150); 
 // Rate of change of error
 fix15 error_derivative = 0;
 fix15 error_previous = 0;
@@ -78,17 +77,15 @@ fix15 error_previous = 0;
 // GPIO we're using for PWM
 #define PWM_OUT 4
 
-// // button setup
-// #define BUTTON_4 4 
-// bool button_pressed = false;
-// bool sequence_active = false;
-// uint32_t sequence_start_time = 0;
-// int sequence_state = 0;
+// button setup
+#define BUTTON_15 15 
+bool button_pressed = false;
+bool button_held = false;
+// for debouncing
+bool sequence_active = false;
+uint32_t sequence_start_time = 0;
+int sequence_state = 0;
 
-// // Add this to your initialization in main()
-// gpio_init(BUTTON_4);
-// gpio_set_dir(BUTTON_4, GPIO_IN);
-// gpio_pull_up(BUTTON_4);  // Enable pull-up resistor
 
 // Variable to hold PWM slice number
 uint slice_num;
@@ -106,28 +103,13 @@ fix15 p_term = 0;
 fix15 i_term = 0;
 fix15 d_term = 0;
 
-// // Check button state
-// bool check_button() {
-//     // Debounce the button
-//     static bool last_state = true;  // Pull-up means unpressed is HIGH
-//     static uint32_t last_change_time = 0;
-    
-//     bool current_state = gpio_get(BUTTON_PIN);
-//     uint32_t current_time = time_us_32();
-    
-//     // If state changed and debounce period passed
-//     if (current_state != last_state && (current_time - last_change_time) > 20000) {  // 20ms debounce
-//         last_state = current_state;
-//         last_change_time = current_time;
-        
-//         // Button pressed (LOW because of pull-up)
-//         if (current_state == false) {
-//             return true;
-//         }
-//     }
-//     return false;
-// }
+bool button_prev=false; 
 
+// check if button is currently held down
+bool is_button_held() {
+    // Read button state (LOW when pressed due to pull-up)
+    return (gpio_get(BUTTON_15) == false);
+}
 
 // Interrupt service routine
 void on_pwm_wrap()
@@ -136,17 +118,8 @@ void on_pwm_wrap()
     pwm_clear_irq(pwm_gpio_to_slice_num(5));
 
     // Read the IMU
-    // NOTE! This is in 15.16 fixed point. Accel in g's, gyro in deg/s
-    // If you want these values in floating point, call fix2float15() on
-    // the raw measurements.
     mpu6050_read_raw(acceleration, gyro);
 
-    // Accelerometer angle (degrees - 15.16 fixed point)
-    // Only ONE of the two lines below will be used, depending whether or not a small angle approximation is appropriate
-
-    // SMALL ANGLE APPROXIMATION
-    // accel_angle = multfix15(divfix(acceleration[0], acceleration[1]), oneeightyoverpi);
-    // NO SMALL ANGLE APPROXIMATION
 
     filtered_ay = filtered_ay + ((acceleration[1] - filtered_ay) >> 6);
     filtered_az = filtered_az + ((acceleration[2] - filtered_az) >> 6);
@@ -162,65 +135,74 @@ void on_pwm_wrap()
     // Complementary angle (degrees - 15.16 fixed point)
     complementary_angle = multfix15(complementary_angle + gyro_angle_delta, zeropt999) + multfix15(accel_angle, zeropt001);
 
-    // // Check button and manage sequence
-    // if (check_button() && !sequence_active) {
-    //     sequence_active = true;
-    //     sequence_start_time = time_us_32();
-    //     sequence_state = 0;
-    //     // Initial state - beam hanging vertically down (motor off)
-    //     target_angle = int2fix15(90);  // Assuming 90 is vertical down
-    //     control = 0;  // Turn off motor
-    // }
 
-    // // If sequence is active, manage the angle changes
+    if(is_button_held())// while button_held, set target to roughly 0
+    {
+        button_prev=true;
+        target_angle = int2fix15(5);
+        sequence_active = false; 
+    }
+    else if(button_prev) //when first released, start sequence
+    {
+        sequence_active = true;
+        sequence_start_time = time_us_32();
+        sequence_state = 0;
+        button_prev=false;
+    }
+
+
+    // If sequence is active, manage the angle changes
+    if (sequence_active && !button_held){
     // if (sequence_active) {
-    //     uint32_t elapsed_time = (time_us_32() - sequence_start_time) / 1000000;  // Convert to seconds
-        
-    //     switch (sequence_state) {
-    //         case 0:
-    //             // At time=0, target angle should be set to horizontal
-    //             if (elapsed_time >= 0) {
-    //                 target_angle = int2fix15(0);  // Assuming 0 is horizontal
-    //                 sequence_state = 1;
-    //             }
-    //             break;
-    //         case 1:
-    //             // At time=5 seconds, target angle should be set to approximately 30 degrees above horizontal
-    //             if (elapsed_time >= 5) {
-    //                 target_angle = int2fix15(30);
-    //                 sequence_state = 2;
-    //             }
-    //             break;
-    //         case 2:
-    //             // At time=10, target angle should be set to approximately 30 degrees below horizontal
-    //             if (elapsed_time >= 10) {
-    //                 target_angle = int2fix15(-30);
-    //                 sequence_state = 3;
-    //             }
-    //             break;
-    //         case 3:
-    //             // At time=15, target angle should be set to horizontal
-    //             if (elapsed_time >= 15) {
-    //                 target_angle = int2fix15(0);
-    //                 sequence_state = 4;
-    //             }
-    //             break;
-    //         case 4:
-    //             // Sequence complete
-    //             if (elapsed_time >= 20) {
-    //                 sequence_active = false;
-    //             }
-    //             break;
-    //     }
-    // }
-
+        uint32_t elapsed_time = (time_us_32() - sequence_start_time) / 1000000;  // Convert to seconds
+        // cycle through angle sequence (i.e. 0 -> 90 -> 120 -> 60 -> 90)
+        switch (sequence_state) {
+            case 0:
+                // At time=0, target angle should be set to horizontal
+                if (elapsed_time >= 0) {
+                    target_angle = int2fix15(90);  
+                    sequence_state = 1;
+                }
+                break;
+            case 1:
+                // At time=5 seconds, target angle => 30 degrees above horizontal
+                if (elapsed_time >= 5) {
+                    target_angle = int2fix15(120);
+                    sequence_state = 2;
+                }
+                break;
+            case 2:
+                // At time=10, target angle => 30 degrees below horizontal
+                if (elapsed_time >= 10) {
+                    target_angle = int2fix15(60);
+                    sequence_state = 3;
+                }
+                break;
+            case 3:
+                // At time=15, target angle => set to horizontal (90 degrees)
+                if (elapsed_time >= 15) {
+                    target_angle = int2fix15(90);
+                    sequence_state = 4;
+                }
+                break;
+            case 4:
+                // Sequence complete
+                if (elapsed_time >= 20) {
+                    sequence_active = false;
+                }
+                break;
+        }
+    }
+    // set error value 
     error = target_angle - complementary_angle;
-
-    // I-term: Calculate integral term (with anti-windup)
-    // if ((control > 0 && fix2int15(error) > 0) || (control < 0 && fix2int15(error) < 0))
-    // {
+    // integral term: accumulate error over time
     error_integral = error_integral + multfix15(error, dt);
-    // }
+
+    //CLamp the integral term to prevent windup
+    if (error_integral > max_integral)
+        error_integral = max_integral; 
+    if (error_integral < -max_integral)
+        error_integral = -max_integral;
 
     // D-term: Calculate derivative term
     error_derivative = divfix(error_previous - complementary_angle, dt);
@@ -231,19 +213,10 @@ void on_pwm_wrap()
     i_term = multfix15(ki, error_integral);
     d_term = multfix15(kd, error_derivative);
 
-
-    // limit the integral term to prevent excessive buildup
-    if (i_term > max_integral)
-        i_term = max_integral;
-    if (i_term < -max_integral)
-        i_term = -max_integral;
-
     // Combine all terms (p, i, d)
     fix15 pid_output = p_term + i_term + d_term;
-    // fix15 pid_output = p_term + d_term;
-
-    // control = fix2int15(multfix15(kp, error));
     control = min(max(fix2int15(pid_output), 0), 3000); // Clamp to 0-3000
+
     // Update duty cycle
     if (control != old_control)
     {
@@ -310,7 +283,6 @@ static PT_THREAD(protothread_vga(struct pt *pt))
 
     while (true)
     {
-        // printf("%f\n",fix2float15(complementary_angle));
         //  Wait on semaphore
         PT_SEM_WAIT(pt, &vga_semaphore);
         // Increment drawspeed controller
@@ -329,25 +301,14 @@ static PT_THREAD(protothread_vga(struct pt *pt))
             // Draw bottom plot (multiply by 120 to scale from +/-2 to +/-250)
             motor_disp = motor_disp + ((control - motor_disp)>>6) ;
 
-
             drawPixel(xcoord, 430 - (int)(NewRange * ((float)(motor_disp) / 5000.0)), WHITE);
             drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(p_term) / 5000.0)), RED);
             drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(i_term) / 5000.0)), GREEN);
             drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(d_term) / 5000.0)), BLUE);
-            // printf("%f,%f,%f, %f, %f\n", fix2float15(p_term), fix2float15(i_term), fix2float15(d_term), fix2float15(complementary_angle), fix2float15(error));
-            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[0]) * 120.0) - OldMin) / OldRange)), WHITE);
-            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(complementary_angle) * 120.0) - OldMin) / OldRange)), WHITE);
-
-            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[1]) * 120.0) - OldMin) / OldRange)), RED);
-            //  drawPixel(xcoord, 430 - (int)(NewRange * ((float)((fix2float15(acceleration[2]) * 120.0) - OldMin) / OldRange)), GREEN);
-
-            // // Draw top plot
-            // drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[0]))-OldMin) / OldRange)), WHITE);
-
+            
+            // Draw top plot: complementary_angle
             drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(complementary_angle))-OldMin) / OldRange)), WHITE);
-            // drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[1]))-OldMin) / OldRange)), RED);
-            //  drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(gyro[2]))-OldMin) / OldRange)), GREEN);
-
+            
             // Update horizontal cursor
             if (xcoord < 609)
             {
@@ -375,50 +336,6 @@ static PT_THREAD(protothread_serial(struct pt *pt))
     ;
     while (1)
     {
-        // chose a value to change
-        // sprintf(pt_serial_out_buffer, "What do you want to tune? (a, p, i or d): ");
-        // serial_write;
-        // // spawn a thread to do the non-blocking serial read
-        // serial_read;
-        // if (pt_serial_in_buffer[0] == 'a')
-        // {
-        //     // spawn a thread to do the non-blocking serial read
-        //     serial_read;
-        //     // convert input string to number
-        //     sscanf(pt_serial_in_buffer, "%d", &angle);
-        //     if (angle > 180)
-        //         continue;
-        //     else if (angle < 0)
-        //         continue;
-        //     else
-        //         target_angle = int2fix15(angle);
-        // }
-        // else if (pt_serial_in_buffer[0] == 'p')
-        // {
-        //     serial_read;
-        //     // convert input string to number
-        //     sscanf(pt_serial_in_buffer, "%f", &p);
-        //     kp = float2fix15(p);
-        // }
-        // else if (pt_serial_in_buffer[0] == 'i')
-        // {
-        //     serial_read;
-        //     // convert input string to number
-        //     sscanf(pt_serial_in_buffer, "%f", &i);
-        //     ki = float2fix15(i);
-        // }
-        // else if (pt_serial_in_buffer[0] == 'd')
-        // {
-        //     serial_read;
-        //     // convert input string to number
-        //     sscanf(pt_serial_in_buffer, "%f", &d);
-        //     kd = float2fix15(d);
-        // }
-        // else
-        // {
-        //     printf("Invalid input. Please enter a valid option.\n");
-        //     continue;
-        // }
         sprintf(pt_serial_out_buffer, "Choose a target angle (0-180) and P I D: ");
         serial_write;
         // spawn a thread to do the non-blocking serial read
@@ -435,17 +352,6 @@ static PT_THREAD(protothread_serial(struct pt *pt))
         kp = float2fix15(p);
         ki = float2fix15(i);
         kd = float2fix15(d);
-
-        // sprintf(pt_serial_out_buffer, "Chose a P, I, D: ");
-        // serial_write;
-        // // spawn a thread to do the non-blocking serial read
-        // serial_read;
-        // // convert input string to number
-        // sscanf(pt_serial_in_buffer, "%f %f %f", &p, &i, &d);
-
-        // kp = float2fix15(p);
-        // ki = float2fix15(i);
-        // kd = float2fix15(d);
     }
     PT_END(pt);
 }
@@ -472,10 +378,6 @@ int main()
     gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
 
-    // Pullup resistors on breakout board, don't need to turn on internals
-    // gpio_pull_up(SDA_PIN) ;
-    // gpio_pull_up(SCL_PIN) ;
-
     // MPU6050 initialization
     mpu6050_reset();
     mpu6050_read_raw(acceleration, gyro);
@@ -487,10 +389,15 @@ int main()
     gpio_set_function(5, GPIO_FUNC_PWM);
     gpio_set_function(4, GPIO_FUNC_PWM);
 
+    // Initialize button with pull up resistor
+    gpio_init(BUTTON_15);
+    gpio_set_dir(BUTTON_15, GPIO_IN);
+    gpio_pull_up(BUTTON_15);  // Enable pull-up resistor
+
     // Find out which PWM slice is connected to GPIO 5 (it's slice 2, same for 4)
     slice_num = pwm_gpio_to_slice_num(5);
 
-    // Mask our slice's IRQ output into the PWM block's single interrupt line,
+    // Mask our slice's IRQ output into make the PWM block's single interrupt line,
     // and register our interrupt handler
     pwm_clear_irq(slice_num);
     pwm_set_irq_enabled(slice_num, true);
