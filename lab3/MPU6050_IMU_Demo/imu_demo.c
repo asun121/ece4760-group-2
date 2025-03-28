@@ -78,6 +78,18 @@ fix15 error_previous = 0;
 // GPIO we're using for PWM
 #define PWM_OUT 4
 
+// // button setup
+// #define BUTTON_4 4 
+// bool button_pressed = false;
+// bool sequence_active = false;
+// uint32_t sequence_start_time = 0;
+// int sequence_state = 0;
+
+// // Add this to your initialization in main()
+// gpio_init(BUTTON_4);
+// gpio_set_dir(BUTTON_4, GPIO_IN);
+// gpio_pull_up(BUTTON_4);  // Enable pull-up resistor
+
 // Variable to hold PWM slice number
 uint slice_num;
 
@@ -93,6 +105,29 @@ fix15 kd = float2fix15(50000.0);
 fix15 p_term = 0;
 fix15 i_term = 0;
 fix15 d_term = 0;
+
+// // Check button state
+// bool check_button() {
+//     // Debounce the button
+//     static bool last_state = true;  // Pull-up means unpressed is HIGH
+//     static uint32_t last_change_time = 0;
+    
+//     bool current_state = gpio_get(BUTTON_PIN);
+//     uint32_t current_time = time_us_32();
+    
+//     // If state changed and debounce period passed
+//     if (current_state != last_state && (current_time - last_change_time) > 20000) {  // 20ms debounce
+//         last_state = current_state;
+//         last_change_time = current_time;
+        
+//         // Button pressed (LOW because of pull-up)
+//         if (current_state == false) {
+//             return true;
+//         }
+//     }
+//     return false;
+// }
+
 
 // Interrupt service routine
 void on_pwm_wrap()
@@ -126,6 +161,58 @@ void on_pwm_wrap()
 
     // Complementary angle (degrees - 15.16 fixed point)
     complementary_angle = multfix15(complementary_angle + gyro_angle_delta, zeropt999) + multfix15(accel_angle, zeropt001);
+
+    // // Check button and manage sequence
+    // if (check_button() && !sequence_active) {
+    //     sequence_active = true;
+    //     sequence_start_time = time_us_32();
+    //     sequence_state = 0;
+    //     // Initial state - beam hanging vertically down (motor off)
+    //     target_angle = int2fix15(90);  // Assuming 90 is vertical down
+    //     control = 0;  // Turn off motor
+    // }
+
+    // // If sequence is active, manage the angle changes
+    // if (sequence_active) {
+    //     uint32_t elapsed_time = (time_us_32() - sequence_start_time) / 1000000;  // Convert to seconds
+        
+    //     switch (sequence_state) {
+    //         case 0:
+    //             // At time=0, target angle should be set to horizontal
+    //             if (elapsed_time >= 0) {
+    //                 target_angle = int2fix15(0);  // Assuming 0 is horizontal
+    //                 sequence_state = 1;
+    //             }
+    //             break;
+    //         case 1:
+    //             // At time=5 seconds, target angle should be set to approximately 30 degrees above horizontal
+    //             if (elapsed_time >= 5) {
+    //                 target_angle = int2fix15(30);
+    //                 sequence_state = 2;
+    //             }
+    //             break;
+    //         case 2:
+    //             // At time=10, target angle should be set to approximately 30 degrees below horizontal
+    //             if (elapsed_time >= 10) {
+    //                 target_angle = int2fix15(-30);
+    //                 sequence_state = 3;
+    //             }
+    //             break;
+    //         case 3:
+    //             // At time=15, target angle should be set to horizontal
+    //             if (elapsed_time >= 15) {
+    //                 target_angle = int2fix15(0);
+    //                 sequence_state = 4;
+    //             }
+    //             break;
+    //         case 4:
+    //             // Sequence complete
+    //             if (elapsed_time >= 20) {
+    //                 sequence_active = false;
+    //             }
+    //             break;
+    //     }
+    // }
 
     error = target_angle - complementary_angle;
 
