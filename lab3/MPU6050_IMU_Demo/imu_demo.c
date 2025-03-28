@@ -139,8 +139,9 @@ void on_pwm_wrap()
     if(is_button_held())// while button_held, set target to roughly 0
     {
         button_prev=true;
-        target_angle = int2fix15(5);
+        target_angle = int2fix15(10);
         sequence_active = false; 
+        sequence_state=0;
     }
     else if(button_prev) //when first released, start sequence
     {
@@ -301,23 +302,25 @@ static PT_THREAD(protothread_vga(struct pt *pt))
             // Draw bottom plot (multiply by 120 to scale from +/-2 to +/-250)
             motor_disp = motor_disp + ((control - motor_disp)>>6) ;
 
-            drawPixel(xcoord, 430 - (int)(NewRange * ((float)(motor_disp) / 5000.0)), WHITE);
-            drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(p_term) / 5000.0)), RED);
-            drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(i_term) / 5000.0)), GREEN);
-            drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(d_term) / 5000.0)), BLUE);
+            printf("%d, %f, %f, %f\n", time_us_32(), fix2float15(target_angle), fix2float15(complementary_angle),(float)(motor_disp));
+
+            // drawPixel(xcoord, 430 - (int)(NewRange * ((float)(motor_disp) / 5000.0)), WHITE);
+            // drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(p_term) / 5000.0)), RED);
+            // drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(i_term) / 5000.0)), GREEN);
+            // drawPixel(xcoord, 430 - (int)(NewRange * (fix2float15(d_term) / 5000.0)), BLUE);
             
-            // Draw top plot: complementary_angle
-            drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(complementary_angle))-OldMin) / OldRange)), WHITE);
+            // // Draw top plot: complementary_angle
+            // drawPixel(xcoord, 230 - (int)(NewRange * ((float)((fix2float15(complementary_angle))-OldMin) / OldRange)), WHITE);
             
-            // Update horizontal cursor
-            if (xcoord < 609)
-            {
-                xcoord += 1;
-            }
-            else
-            {
-                xcoord = 81;
-            }
+            // // Update horizontal cursor
+            // if (xcoord < 609)
+            // {
+            //     xcoord += 1;
+            // }
+            // else
+            // {
+            //     xcoord = 81;
+            // }
         }
     }
     // Indicate end of thread
